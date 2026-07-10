@@ -116,7 +116,7 @@ jobs:
           echo "## Getting Started" >> /tmp/release-notes.md
           echo '```sh' >> /tmp/release-notes.md
           echo "curl -LO https://github.com/${REPO}/releases/download/v${VERSION}/docker-compose.prod.yml" >> /tmp/release-notes.md
-          echo "SENSIFY_API_TOKEN=<your-token> docker compose -f docker-compose.prod.yml up -d" >> /tmp/release-notes.md
+          echo "docker compose -f docker-compose.prod.yml up -d" >> /tmp/release-notes.md
           echo '```' >> /tmp/release-notes.md
           echo "" >> /tmp/release-notes.md
           echo "## Images" >> /tmp/release-notes.md

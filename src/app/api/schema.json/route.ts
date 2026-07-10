@@ -71,7 +71,7 @@ const schema = {
       bearerAuth: {
         type: 'http',
         scheme: 'bearer',
-        description: 'Set SENSIFY_API_TOKEN on the server and pass it as Authorization: Bearer <token>',
+        description: 'Configure the API token on the Settings page and pass it as Authorization: Bearer <token>',
       },
     },
   },

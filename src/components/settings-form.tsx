@@ -39,6 +39,27 @@ export function SettingsForm({ config }: { config: AppConfig }) {
         </p>
       </div>
 
+      <div className="space-y-1.5">
+        <label htmlFor="apiToken" className="text-sm font-medium text-foreground">
+          API token
+        </label>
+        <input
+          id="apiToken"
+          name="apiToken"
+          type="text"
+          required
+          minLength={8}
+          maxLength={128}
+          defaultValue={config.apiToken}
+          className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-primary"
+        />
+        <p className="text-xs text-muted-foreground">
+          Devices must send this as{' '}
+          <code className="font-mono bg-muted px-1 rounded">Authorization: Bearer &lt;token&gt;</code>{' '}
+          when POSTing readings. Changing it takes effect immediately.
+        </p>
+      </div>
+
       <div className="flex items-center gap-3">
         <SubmitButton />
         {state?.success && (

@@ -16,6 +16,12 @@ import { PullDeviceInputSchema } from '@/lib/schemas'
 
 const ConfigSchema = z.object({
   temperatureUnit: z.enum(['C', 'F', 'K']),
+  apiToken: z
+    .string()
+    .trim()
+    .min(8, 'API token must be at least 8 characters')
+    .max(128, 'API token must be at most 128 characters')
+    .regex(/^[\x21-\x7e]+$/, 'API token must be printable ASCII with no spaces'),
 })
 
 export async function updateConfigAction(
@@ -24,9 +30,10 @@ export async function updateConfigAction(
 ): Promise<{ error?: string; success?: boolean }> {
   const result = ConfigSchema.safeParse({
     temperatureUnit: formData.get('temperatureUnit'),
+    apiToken: formData.get('apiToken'),
   })
   if (!result.success) {
-    return { error: result.error.flatten().fieldErrors.temperatureUnit?.[0] ?? 'Invalid values' }
+    return { error: result.error.issues[0]?.message ?? 'Invalid values' }
   }
   await saveConfig(result.data)
   revalidatePath('/', 'layout')

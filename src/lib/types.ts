@@ -55,4 +55,7 @@ export interface LatestMetric {
 
 export interface AppConfig {
   temperatureUnit: TemperatureUnit
+  // Bearer token devices must send to POST readings. Stored in the config
+  // table; seeded from SENSIFY_API_TOKEN env (if set) or generated on first read.
+  apiToken: string
 }

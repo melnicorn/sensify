@@ -1,5 +1,7 @@
 # Production deployment (e.g. Raspberry Pi) using published GHCR images.
-# Usage: SENSIFY_API_TOKEN=<token> docker compose -f docker-compose.prod.yml up -d
+# Usage: docker compose -f docker-compose.prod.yml up -d
+# The push-API token is managed in the Settings UI (auto-generated on first
+# boot); optionally set SENSIFY_API_TOKEN to seed it on a fresh install.
 services:
   web:
     image: ghcr.io/melnicorn/sensify:latest
@@ -12,7 +14,6 @@ services:
       - /etc/localtime:/etc/localtime:ro
     environment:
       - DATA_DIR=/data
-      - SENSIFY_API_TOKEN=${SENSIFY_API_TOKEN:?SENSIFY_API_TOKEN must be set}
     restart: unless-stopped
 
   poller:

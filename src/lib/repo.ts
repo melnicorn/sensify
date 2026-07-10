@@ -346,22 +346,40 @@ export async function getLatestMetrics(sensorId: string): Promise<LatestMetric[]
 
 // ---------- config ----------
 
-const DEFAULT_CONFIG: AppConfig = { temperatureUnit: 'F' }
-
-export async function getConfig(): Promise<AppConfig> {
-  const row = getDb().prepare("SELECT value FROM config WHERE key = 'temperatureUnit'").get() as
+function getConfigValue(key: string): string | undefined {
+  const row = getDb().prepare('SELECT value FROM config WHERE key = ?').get(key) as
     | { value: string }
     | undefined
+  return row?.value
+}
+
+function setConfigValue(key: string, value: string): void {
+  getDb()
+    .prepare(
+      `INSERT INTO config (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+    )
+    .run(key, value)
+}
+
+/** Returns the stored API token, seeding it on first read from the
+ *  SENSIFY_API_TOKEN env var (if set) or a generated random value. */
+function ensureApiToken(): string {
+  const stored = getConfigValue('apiToken')
+  if (stored) return stored
+  const token = process.env.SENSIFY_API_TOKEN || crypto.randomUUID().replace(/-/g, '')
+  setConfigValue('apiToken', token)
+  return token
+}
+
+export async function getConfig(): Promise<AppConfig> {
   return {
-    temperatureUnit: (row?.value as TemperatureUnit) ?? DEFAULT_CONFIG.temperatureUnit,
+    temperatureUnit: (getConfigValue('temperatureUnit') as TemperatureUnit) ?? 'F',
+    apiToken: ensureApiToken(),
   }
 }
 
 export async function saveConfig(config: AppConfig): Promise<void> {
-  getDb()
-    .prepare(
-      `INSERT INTO config (key, value) VALUES ('temperatureUnit', ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value`
-    )
-    .run(config.temperatureUnit)
+  setConfigValue('temperatureUnit', config.temperatureUnit)
+  setConfigValue('apiToken', config.apiToken)
 }

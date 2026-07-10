@@ -1,12 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ReadingInputSchema } from '@/lib/schemas'
-import { saveReading } from '@/lib/storage'
+import { saveReading, getConfig } from '@/lib/storage'
 
 export async function POST(request: NextRequest) {
-  const expectedToken = process.env.SENSIFY_API_TOKEN
-  if (!expectedToken) {
-    return NextResponse.json({ error: 'Server misconfigured: SENSIFY_API_TOKEN not set' }, { status: 500 })
-  }
+  const { apiToken: expectedToken } = await getConfig()
 
   const auth = request.headers.get('authorization')
   if (!auth || auth !== `Bearer ${expectedToken}`) {
