@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+    inputs:
+      create_image:
+        type: boolean
+        description: "Build and push Docker images"
+        default: false
+
+jobs:
+  test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: actions/setup-node@v6.4.0
+        with:
+          node-version: "22"
+
+      - run: corepack enable
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm check-types
+
+      - run: pnpm build
+
+  publish:
+    name: Build & Push Image
+    needs: test
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && inputs.create_image == true)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.x"
+
+      - name: Generate next version
+        id: version
+        run: |
+          VERSION=$(python3 .github/scripts/next-version.py)
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "version_tag=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "latest_tag=latest" >> "$GITHUB_OUTPUT"
+            echo "is_main=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "version_tag=${VERSION}-snapshot" >> "$GITHUB_OUTPUT"
+            echo "latest_tag=latest-snapshot" >> "$GITHUB_OUTPUT"
+            echo "is_main=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-qemu-action@v4.0.0
+
+      - uses: docker/setup-buildx-action@v4.0.0
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v7.1.0
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/sensify:${{ steps.version.outputs.latest_tag }}
+            ghcr.io/${{ github.repository_owner }}/sensify:${{ steps.version.outputs.version_tag }}
+
+      - name: Find previous git tag
+        if: steps.version.outputs.is_main == 'true'
+        id: prev_tag
+        run: echo "tag=$(git describe --tags --abbrev=0 2>/dev/null || echo '')" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        if: steps.version.outputs.is_main == 'true'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PREVIOUS_TAG: ${{ steps.prev_tag.outputs.tag }}
+        run: |
+          if [ -n "$GEMINI_API_KEY" ]; then
+            bash .github/scripts/release-notes.sh > /tmp/release-notes.md
+          else
+            # No GEMINI_API_KEY secret configured — plain commit-log notes
+            {
+              echo "## Changes"
+              if [ -n "$PREVIOUS_TAG" ]; then
+                git log "${PREVIOUS_TAG}..HEAD" --no-merges --pretty='- %s'
+              else
+                git log --no-merges --pretty='- %s'
+              fi
+            } > /tmp/release-notes.md
+          fi
+          VERSION="${{ steps.version.outputs.version }}"
+          REPO="${{ github.repository }}"
+          echo "" >> /tmp/release-notes.md
+          echo "## Getting Started" >> /tmp/release-notes.md
+          echo '```sh' >> /tmp/release-notes.md
+          echo "curl -LO https://github.com/${REPO}/releases/download/v${VERSION}/docker-compose.prod.yml" >> /tmp/release-notes.md
+          echo "SENSIFY_API_TOKEN=<your-token> docker compose -f docker-compose.prod.yml up -d" >> /tmp/release-notes.md
+          echo '```' >> /tmp/release-notes.md
+          echo "" >> /tmp/release-notes.md
+          echo "## Images" >> /tmp/release-notes.md
+          echo "- \`ghcr.io/${{ github.repository_owner }}/sensify:${VERSION}\`" >> /tmp/release-notes.md
+
+      - name: Create and push git tag
+        if: steps.version.outputs.is_main == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${{ steps.version.outputs.version }}" -m "v${{ steps.version.outputs.version }}"
+          git push origin "v${{ steps.version.outputs.version }}"
+
+      - name: Create GitHub release
+        if: steps.version.outputs.is_main == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${{ steps.version.outputs.version }}" \
+            --title "v${{ steps.version.outputs.version }}" \
+            --notes-file /tmp/release-notes.md \
+            docker-compose.prod.yml

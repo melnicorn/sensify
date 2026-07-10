@@ -3,11 +3,19 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { z } from 'zod'
-import { saveConfig, deleteSensorData, updateSensorMeta, updateDesiredInterval } from '@/lib/storage'
+import {
+  saveConfig,
+  deleteSensorData,
+  updateSensorMeta,
+  updateDesiredInterval,
+  createPullSensor,
+  updatePullSensor,
+  setPullEnabled,
+} from '@/lib/storage'
+import { PullDeviceInputSchema } from '@/lib/schemas'
 
 const ConfigSchema = z.object({
   temperatureUnit: z.enum(['C', 'F', 'K']),
-  truncationDays: z.coerce.number().int().min(1).max(365),
 })
 
 export async function updateConfigAction(
@@ -16,7 +24,6 @@ export async function updateConfigAction(
 ): Promise<{ error?: string; success?: boolean }> {
   const result = ConfigSchema.safeParse({
     temperatureUnit: formData.get('temperatureUnit'),
-    truncationDays: formData.get('truncationDays'),
   })
   if (!result.success) {
     return { error: result.error.flatten().fieldErrors.temperatureUnit?.[0] ?? 'Invalid values' }
@@ -54,6 +61,99 @@ export async function updateSensorMetaAction(
   })
   revalidatePath(`/sensors/${sensorId}`)
   return { success: true }
+}
+
+// ---------- pull devices ----------
+
+export interface TestPullResult {
+  ok: boolean
+  status?: number
+  latencyMs?: number
+  body?: unknown
+  error?: string
+}
+
+export async function testPullAction(url: string): Promise<TestPullResult> {
+  const parsed = z.string().url().safeParse(url)
+  if (!parsed.success || !/^https?:\/\//.test(url)) {
+    return { ok: false, error: 'Enter a valid http or https URL' }
+  }
+  const started = Date.now()
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(5000),
+      cache: 'no-store',
+      headers: { accept: 'application/json' },
+    })
+    const latencyMs = Date.now() - started
+    if (!res.ok) {
+      return { ok: false, status: res.status, latencyMs, error: `Device returned HTTP ${res.status}` }
+    }
+    const text = await res.text()
+    try {
+      return { ok: true, status: res.status, latencyMs, body: JSON.parse(text) }
+    } catch {
+      return { ok: false, status: res.status, latencyMs, error: 'Response is not valid JSON' }
+    }
+  } catch (err) {
+    const message =
+      err instanceof Error && err.name === 'TimeoutError'
+        ? 'Connection timed out (5s)'
+        : `Connection failed: ${err instanceof Error ? err.message : 'unknown error'}`
+    return { ok: false, latencyMs: Date.now() - started, error: message }
+  }
+}
+
+export interface SavePullDeviceResult {
+  id?: string
+  error?: string
+}
+
+export async function createPullDeviceAction(input: unknown): Promise<SavePullDeviceResult> {
+  const result = PullDeviceInputSchema.safeParse(input)
+  if (!result.success) {
+    return { error: result.error.issues[0]?.message ?? 'Invalid device configuration' }
+  }
+  const { lastSample } = extractSample(input)
+  const id = await createPullSensor({ ...result.data, lastSample })
+  revalidatePath('/')
+  return { id }
+}
+
+export async function updatePullDeviceAction(
+  sensorId: string,
+  input: unknown
+): Promise<SavePullDeviceResult> {
+  const result = PullDeviceInputSchema.safeParse(input)
+  if (!result.success) {
+    return { error: result.error.issues[0]?.message ?? 'Invalid device configuration' }
+  }
+  const { lastSample } = extractSample(input)
+  try {
+    await updatePullSensor(sensorId, { ...result.data, lastSample })
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Update failed' }
+  }
+  revalidatePath('/')
+  revalidatePath(`/sensors/${sensorId}`)
+  return { id: sensorId }
+}
+
+function extractSample(input: unknown): { lastSample: string | null } {
+  if (input && typeof input === 'object' && 'sample' in input) {
+    const sample = (input as { sample: unknown }).sample
+    if (sample !== undefined && sample !== null) {
+      const json = JSON.stringify(sample)
+      if (json.length <= 65536) return { lastSample: json }
+    }
+  }
+  return { lastSample: null }
+}
+
+export async function setPullEnabledAction(sensorId: string, enabled: boolean): Promise<void> {
+  await setPullEnabled(sensorId, enabled)
+  revalidatePath(`/sensors/${sensorId}`)
+  revalidatePath('/')
 }
 
 export async function updateDesiredIntervalAction(
