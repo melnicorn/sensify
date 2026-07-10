@@ -1,0 +1,30 @@
+# Production deployment (e.g. Raspberry Pi) using published GHCR images.
+# Usage: SENSIFY_API_TOKEN=<token> docker compose -f docker-compose.prod.yml up -d
+services:
+  web:
+    image: ghcr.io/melnicorn/sensify:latest
+    ports:
+      # Host port 3010 — cronulent's web UI occupies 3000 on the Pi
+      - "3010:3000"
+    volumes:
+      - sensor-data:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - DATA_DIR=/data
+      - SENSIFY_API_TOKEN=${SENSIFY_API_TOKEN:?SENSIFY_API_TOKEN must be set}
+    restart: unless-stopped
+
+  poller:
+    image: ghcr.io/melnicorn/sensify:latest
+    command: ["pnpm", "poller"]
+    volumes:
+      - sensor-data:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - DATA_DIR=/data
+    restart: unless-stopped
+
+volumes:
+  sensor-data:
