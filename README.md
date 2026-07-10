@@ -36,6 +36,16 @@ Both share a `sensor-data` volume holding the SQLite database, which is created 
 
 Open `http://<host>:3010`, then visit **Settings** to find your API token (auto-generated on first boot). Devices use this token to push readings.
 
+### Upgrading
+
+The `latest` tag is cached locally, so force a fresh pull when upgrading:
+
+```sh
+docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d
+```
+
+Only containers whose image actually changed are recreated; your data volume is untouched.
+
 ## Adding a pull device
 
 1. Click **Add device** on the dashboard
