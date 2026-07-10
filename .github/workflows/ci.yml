@@ -1,5 +1,10 @@
 name: CI
 
+# A new push to the same branch cancels any in-flight run for that branch
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: ["**"]
