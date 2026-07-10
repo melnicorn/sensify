@@ -14,5 +14,18 @@ services:
       - SENSIFY_API_TOKEN=${SENSIFY_API_TOKEN}
     restart: unless-stopped
 
+  poller:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["pnpm", "poller"]
+    volumes:
+      - sensor-data:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - DATA_DIR=/data
+    restart: unless-stopped
+
 volumes:
   sensor-data:

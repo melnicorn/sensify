@@ -33,11 +33,11 @@ export async function POST(request: NextRequest) {
     request.headers.get('x-real-ip') ??
     'unknown'
 
-  const { reading, desiredConfig } = await saveReading(result.data, callerIp)
+  const { id, timestamp, desiredConfig } = await saveReading(result.data, callerIp)
 
   const responseBody: Record<string, unknown> = {
-    id: reading.id,
-    timestamp: reading.timestamp,
+    id,
+    timestamp,
   }
   if (desiredConfig) {
     responseBody.config = desiredConfig

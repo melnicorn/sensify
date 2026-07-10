@@ -39,24 +39,6 @@ export function SettingsForm({ config }: { config: AppConfig }) {
         </p>
       </div>
 
-      <div className="space-y-1.5">
-        <label htmlFor="truncationDays" className="text-sm font-medium text-foreground">
-          Data retention (days)
-        </label>
-        <input
-          id="truncationDays"
-          name="truncationDays"
-          type="number"
-          min={1}
-          max={365}
-          defaultValue={config.truncationDays}
-          className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-        />
-        <p className="text-xs text-muted-foreground">
-          Readings older than this many days are deleted on the next write from that sensor.
-        </p>
-      </div>
-
       <div className="flex items-center gap-3">
         <SubmitButton />
         {state?.success && (

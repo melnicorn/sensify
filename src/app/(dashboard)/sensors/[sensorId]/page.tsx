@@ -1,33 +1,19 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Wifi } from 'lucide-react'
+import { ArrowLeft, Wifi, Download, Upload } from 'lucide-react'
 import { getSensorMeta, getReadings, getConfig } from '@/lib/storage'
 import { SensorChartLive } from '@/components/sensor-chart-live'
 import { DeleteSensorButton } from '@/components/delete-sensor-button'
 import { SensorMetaPanel } from '@/components/sensor-meta-panel'
 import { SensorIntervalForm } from '@/components/sensor-interval-form'
+import { PullStatusPanel } from '@/components/pull-status-panel'
 import { updateSensorMetaAction, updateDesiredIntervalAction } from '@/app/actions'
 
-const RANGES: Record<string, { label: string; days: number }> = {
-  '1h': { label: '1 hour', days: 0 },
-  '24h': { label: '24 hours', days: 1 },
-  '7d': { label: '7 days', days: 7 },
-  '30d': { label: '30 days', days: 30 },
-}
-
-function getRangeDates(range: string): { fromDate: string; toDate: string } {
-  const now = new Date()
-  const toDate = now.toISOString().substring(0, 10)
-  if (range === '1h') return { fromDate: toDate, toDate }
-  const days = RANGES[range]?.days ?? 7
-  const from = new Date(now)
-  from.setDate(from.getDate() - days)
-  return { fromDate: from.toISOString().substring(0, 10), toDate }
-}
-
-function filterByHours(readings: Awaited<ReturnType<typeof getReadings>>, hours: number) {
-  const cutoff = new Date(Date.now() - hours * 3600_000).toISOString()
-  return readings.filter((r) => r.timestamp >= cutoff)
+const RANGES: Record<string, { label: string; hours: number }> = {
+  '1h': { label: '1 hour', hours: 1 },
+  '24h': { label: '24 hours', hours: 24 },
+  '7d': { label: '7 days', hours: 24 * 7 },
+  '30d': { label: '30 days', hours: 24 * 30 },
 }
 
 export default async function SensorDetailPage({
@@ -44,9 +30,9 @@ export default async function SensorDetailPage({
   const [meta, config] = await Promise.all([getSensorMeta(sensorId), getConfig()])
   if (!meta) notFound()
 
-  const { fromDate, toDate } = getRangeDates(range)
-  let readings = await getReadings(sensorId, fromDate, toDate)
-  if (range === '1h') readings = filterByHours(readings, 1)
+  const now = new Date()
+  const from = new Date(now.getTime() - RANGES[range]!.hours * 3_600_000)
+  const readings = await getReadings(sensorId, from.toISOString(), now.toISOString())
 
   // Bind server actions to this sensor
   const metaAction = updateSensorMetaAction.bind(null, meta.id)
@@ -70,7 +56,14 @@ export default async function SensorDetailPage({
       <div className="rounded-lg border border-border bg-card p-4">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1 min-w-0">
-            <h1 className="text-lg font-semibold text-foreground">{meta.name}</h1>
+            <h1 className="flex items-center gap-2 text-lg font-semibold text-foreground">
+              {meta.type === 'pull' ? (
+                <Download size={15} className="text-muted-foreground" aria-label="Pull device" />
+              ) : (
+                <Upload size={15} className="text-muted-foreground" aria-label="Push device" />
+              )}
+              {meta.name}
+            </h1>
             <p className="text-xs text-muted-foreground font-mono">{meta.id}</p>
             <p className="text-xs text-muted-foreground">
               First seen: {new Date(meta.firstSeen).toLocaleString()} · Last seen:{' '}
@@ -87,10 +80,14 @@ export default async function SensorDetailPage({
         </div>
       </div>
 
-      {/* Metadata + remote config side by side */}
+      {/* Metadata + device config side by side */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <SensorMetaPanel meta={meta} editAction={metaAction} />
-        <SensorIntervalForm desiredInterval={meta.desiredInterval} setAction={intervalAction} />
+        {meta.type === 'pull' ? (
+          <PullStatusPanel meta={meta} />
+        ) : (
+          <SensorIntervalForm desiredInterval={meta.desiredInterval} setAction={intervalAction} />
+        )}
       </div>
 
       {/* Chart controls */}
@@ -112,7 +109,7 @@ export default async function SensorDetailPage({
 
       <SensorChartLive
         key={range}
-        sensorId={sensorId}
+        meta={meta}
         range={range}
         initialReadings={readings}
         config={config}

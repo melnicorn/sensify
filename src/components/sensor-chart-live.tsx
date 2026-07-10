@@ -2,18 +2,18 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { SensorChart } from './sensor-chart'
-import type { SensorReading, AppConfig } from '@/lib/types'
+import type { MetricReading, SensorMeta, AppConfig } from '@/lib/types'
 
 const REFRESH_MS = 30_000
 
 interface Props {
-  sensorId: string
+  meta: SensorMeta
   range: string
-  initialReadings: SensorReading[]
+  initialReadings: MetricReading[]
   config: AppConfig
 }
 
-export function SensorChartLive({ sensorId, range, initialReadings, config }: Props) {
+export function SensorChartLive({ meta, range, initialReadings, config }: Props) {
   const [readings, setReadings] = useState(initialReadings)
   const [pulse, setPulse] = useState(false)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -26,9 +26,9 @@ export function SensorChartLive({ sensorId, range, initialReadings, config }: Pr
   useEffect(() => {
     async function refresh() {
       try {
-        const res = await fetch(`/api/v1/sensors/${sensorId}/readings?range=${range}`)
+        const res = await fetch(`/api/v1/sensors/${meta.id}/readings?range=${range}`)
         if (!res.ok) return
-        const data: SensorReading[] = await res.json()
+        const data: MetricReading[] = await res.json()
         setReadings(data)
         // Brief pulse to signal the chart just updated
         setPulse(true)
@@ -42,12 +42,14 @@ export function SensorChartLive({ sensorId, range, initialReadings, config }: Pr
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
     }
-  }, [sensorId, range])
+  }, [meta.id, range])
+
+  const pointCount = new Set(readings.map((r) => r.ts)).size
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-end gap-3">
-        <span className="text-xs text-muted-foreground">{readings.length} readings</span>
+        <span className="text-xs text-muted-foreground">{pointCount} readings</span>
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <span
             className={`inline-block w-1.5 h-1.5 rounded-full transition-colors duration-500 ${
@@ -57,7 +59,7 @@ export function SensorChartLive({ sensorId, range, initialReadings, config }: Pr
           Live
         </span>
       </div>
-      <SensorChart readings={readings} config={config} />
+      <SensorChart readings={readings} meta={meta} config={config} />
     </div>
   )
 }

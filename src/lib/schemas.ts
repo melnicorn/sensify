@@ -41,3 +41,36 @@ export const ReadingInputSchema = z.object({
 
 export type ReadingInput = z.infer<typeof ReadingInputSchema>
 export type SensorMetaInput = z.infer<typeof SensorMetaInputSchema>
+
+// ---------- pull devices ----------
+
+export const PullFieldSchema = z.object({
+  path: z.string().min(1).max(256),
+  metric: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[a-zA-Z0-9_.-]+$/, 'Metric name must be alphanumeric (dots, dashes, underscores allowed)'),
+  unit: z.string().max(16).optional(),
+})
+
+export const PullDeviceInputSchema = z.object({
+  name: z.string().min(1).max(128),
+  url: z
+    .string()
+    .max(512)
+    .url()
+    .refine((u) => u.startsWith('http://') || u.startsWith('https://'), {
+      message: 'URL must be http or https',
+    }),
+  pollInterval: z.number().int().min(2).max(86400),
+  fields: z
+    .array(PullFieldSchema)
+    .min(1, 'Select at least one field to record')
+    .max(50)
+    .refine((fields) => new Set(fields.map((f) => f.metric)).size === fields.length, {
+      message: 'Metric names must be unique',
+    }),
+})
+
+export type PullDeviceInput = z.infer<typeof PullDeviceInputSchema>
