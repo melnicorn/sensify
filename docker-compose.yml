@@ -1,0 +1,18 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - sensor-data:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - DATA_DIR=/data
+      - SENSIFY_API_TOKEN=${SENSIFY_API_TOKEN}
+    restart: unless-stopped
+
+volumes:
+  sensor-data:

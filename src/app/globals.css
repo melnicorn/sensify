@@ -1,0 +1,81 @@
+@import "tailwindcss";
+@import "@heroui/styles";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-header: var(--header);
+  --color-footer: var(--footer);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+}
+
+:root {
+  --background: white;
+  --foreground: var(--color-slate-900);
+  --header: var(--color-slate-100);
+  --footer: var(--color-slate-100);
+  --card: white;
+  --card-foreground: var(--color-slate-900);
+  --muted: var(--color-slate-100);
+  --muted-foreground: var(--color-slate-500);
+  --border: var(--color-slate-200);
+  --input: var(--color-slate-200);
+  --primary: var(--color-blue-600);
+  --primary-foreground: white;
+  --destructive: var(--color-red-500);
+  --destructive-foreground: white;
+  --accent: var(--color-slate-100);
+  --accent-foreground: var(--color-slate-900);
+}
+
+.dark {
+  --background: var(--color-slate-900);
+  --foreground: var(--color-cyan-50);
+  --header: var(--color-slate-950);
+  --footer: var(--color-slate-950);
+  --card: var(--color-cyan-950);
+  --card-foreground: var(--color-cyan-50);
+  --muted: var(--color-cyan-900);
+  --muted-foreground: var(--color-cyan-300);
+  --border: var(--color-slate-700);
+  --input: var(--color-slate-700);
+  --primary: var(--color-cyan-400);
+  --primary-foreground: var(--color-cyan-950);
+  --destructive: var(--color-red-700);
+  --destructive-foreground: var(--color-red-50);
+  --accent: var(--color-cyan-900);
+  --accent-foreground: var(--color-cyan-50);
+}
+
+* {
+  box-sizing: border-box;
+  border-color: var(--color-border);
+}
+
+button, a {
+  cursor: pointer;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: inherit;
+}
