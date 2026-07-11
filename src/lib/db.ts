@@ -138,13 +138,19 @@ CREATE INDEX idx_alert_events_rule ON alert_events (rule_id, started_at);
 ]
 
 function migrate(database: Database.Database): void {
-  const current = database.pragma('user_version', { simple: true }) as number
-  for (let v = current; v < MIGRATIONS.length; v++) {
-    const apply = database.transaction(() => {
+  // The web and poller processes both open the database at boot. Each step
+  // takes a write lock (BEGIN IMMEDIATE) and re-reads user_version inside it,
+  // so whichever process loses the race skips the already-applied migration
+  // instead of failing on e.g. a duplicate ALTER TABLE.
+  for (;;) {
+    const applied = database.transaction((): boolean => {
+      const v = database.pragma('user_version', { simple: true }) as number
+      if (v >= MIGRATIONS.length) return false
       database.exec(MIGRATIONS[v]!)
       database.pragma(`user_version = ${v + 1}`)
-    })
-    apply()
+      return true
+    }).immediate()
+    if (!applied) break
   }
 }
 
