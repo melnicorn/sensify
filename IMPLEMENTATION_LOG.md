@@ -1,8 +1,7 @@
 # Alerts feature — implementation log
 
 Branch: `feature/alerts`. One commit per step; each commit typechecks and runs
-on its own, so any step is a safe rollback point. Commit hashes are backfilled
-in the final docs commit (see `git log feature/alerts` in the meantime).
+on its own, so any step is a safe rollback point.
 
 Related work committed to `main` just before this branch:
 
@@ -13,13 +12,22 @@ Related work committed to `main` just before this branch:
 
 | # | Commit | Feature |
 |---|--------|---------|
-| 1 | _pending_ | Migration helper: `PRAGMA user_version` versioned migrations in `src/lib/db.ts`; baseline schema becomes migration 1 (idempotent for existing deployments) |
-| 2 | _pending_ | Unit registry + normalization: alias table (`degC`/`°C`/… → canonical), `pull_fields.unit_kind`, temperature pull metrics stored °C and converted for display |
-| 3 | _pending_ | Alert data layer: `channels`, `alert_rules`, `alert_rule_channels`, `alert_rule_state`, `alert_events` tables + CRUD repo + Zod definition schema (v1 `level` trigger) |
-| 4 | _pending_ | Alert engine: pure state-machine core, `level` evaluator, ingest hook (push + pull), poller sweeper; log-only notifications; replay script |
-| 5 | _pending_ | Telegram channel driver + notification dispatch from engine transitions |
-| 6 | _pending_ | Notification channels admin UI (create/edit/delete/test-send) |
-| 7 | _pending_ | Fit + backtest library: selection → fitted rule params; rule + history → detected events |
-| 8 | _pending_ | Create-alert wizard: drag selection → sentence chips → backtest strip → channels → save |
-| 9 | _pending_ | Alerts management UI: per-sensor panel, rules list, event history, enable/disable |
-| 10 | _pending_ | Docs + end-to-end verification (replayed wash cycle through live poller) |
+| 1 | `00a8202` | Migration helper: `PRAGMA user_version` versioned migrations in `src/lib/db.ts`; baseline schema becomes migration 1 (idempotent for existing deployments) |
+| 2 | `7f129c7` | Unit registry + normalization: alias table (`degC`/`°C`/… → canonical), `pull_fields.unit_kind`, temperature pull metrics stored °C and converted for display |
+| 3 | `26f8159` | Alert data layer: `channels`, `alert_rules`, `alert_rule_channels`, `alert_rule_state`, `alert_events` tables + CRUD repo + Zod definition schema (v1 `level` trigger) |
+| 4 | `58a4e93` | Alert engine: pure state-machine core (`machine.ts`), `level` evaluator, ingest hook (push + pull share one code path), poller sweeper; verified by replaying the captured wash cycle (one start, one end) |
+| 5 | `249c9da` | Telegram channel driver + notification dispatch from engine transitions; per-channel delivery status |
+| 6 | `04d3918` | Notification channels admin UI in Settings (create/edit/delete/test-send) |
+| 7 | `8071caf` | Fit + backtest library: selection → fitted rule params (baseline-edge trimming); rule + history → detected events via the exact engine core |
+| 8 | `666cd6d` | Create-alert wizard: drag selection → editable sentence → 7-day backtest strip → channels → save; auto-picks the best-fitting metric |
+| 9 | `97c4edc` | Alerts management UI: `/alerts` page (rules + event history), per-sensor alerts card, pause/resume/delete |
+| 10 | HEAD | Docs (README alerts section, feature bullets), manual "New alert" path (no selection needed, e.g. plain humidity thresholds), wizard edit-clobber guard; live E2E: mock device → poller → engine → real Telegram delivery confirmed |
+
+## Notes
+
+- Rule definitions are versioned JSON (`{"v":1, "trigger":{"kind":"level",…}}`) — new
+  trigger kinds extend the `kind` discriminated union in `src/lib/alerts/schemas.ts`
+  plus an evaluator; the lifecycle/notification machinery is shared.
+- Runtime state (`alert_rule_state`) is written on phase transitions only and is
+  keyed to `alert_rules.updated_at`, so editing a rule resets it cleanly.
+- Temperatures are canonical °C everywhere (storage, thresholds); display converts.

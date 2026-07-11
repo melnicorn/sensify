@@ -118,6 +118,16 @@ export function SensorChartLive({ meta, range, initialReadings, config, channels
             </button>
           </span>
         )}
+        {!selection && (
+          <button
+            onClick={() => setWizardOpen(true)}
+            title="Create an alert for this sensor (tip: drag on the chart to fit one from an example event)"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors border border-border"
+          >
+            <BellPlus size={14} />
+            New alert
+          </button>
+        )}
         <span className="text-xs text-muted-foreground">{pointCount} readings</span>
         <span
           className="flex items-center gap-1.5 text-xs text-muted-foreground"
@@ -139,7 +149,7 @@ export function SensorChartLive({ meta, range, initialReadings, config, channels
         selection={selection}
         onSelectionChange={setSelection}
       />
-      {selection && (
+      {wizardOpen && (
         <AlertWizard
           meta={meta}
           config={config}

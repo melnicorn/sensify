@@ -4,7 +4,7 @@
 // (fit.ts, running client-side on already-loaded readings), presents them as
 // an editable sentence, and previews the rule with a 7-day backtest strip
 // before saving. Fitting is UI sugar — the saved artifact is plain rule JSON.
-import { useState, useEffect, useMemo, useTransition } from 'react'
+import { useState, useEffect, useMemo, useRef, useTransition } from 'react'
 import { Button, Modal } from '@heroui/react'
 import { AlertTriangle } from 'lucide-react'
 import { fitLevelRule, backtestRule, type BacktestEvent } from '@/lib/alerts/fit'
@@ -36,7 +36,7 @@ interface Props {
   config: AppConfig
   channels: Channel[]
   readings: MetricReading[]
-  selection: TimeSelection
+  selection: TimeSelection | null // null = manual creation, no fitting
   open: boolean
   onClose: () => void
 }
@@ -56,6 +56,7 @@ export function AlertWizard({ meta, config, channels, readings, selection, open,
   // Default to the metric where the selection stands out most from baseline
   const [metric, setMetric] = useState(() => {
     let best = metrics[0] ?? ''
+    if (!selection) return best
     let bestScore = -Infinity
     for (const m of metrics) {
       const pts = readings
@@ -99,9 +100,35 @@ export function AlertWizard({ meta, config, channels, readings, selection, open,
     [readings, metric]
   )
 
-  // Fit once per metric/selection while open
+  // Fit once per metric/selection while open; manual mode seeds defaults.
+  // Keyed so live chart refreshes can't clobber the user's in-progress edits.
+  const seededKey = useRef<string | null>(null)
   useEffect(() => {
-    if (!open || !metric) return
+    if (!open) {
+      seededKey.current = null
+      return
+    }
+    if (!metric) return
+    const key = `${metric}:${selection?.from ?? ''}:${selection?.to ?? ''}`
+    if (seededKey.current === key) return
+    seededKey.current = key
+    if (!selection) {
+      const latest = points[points.length - 1]?.value ?? 0
+      setFitError(null)
+      setParams({
+        agg: 'avg',
+        windowS: 60,
+        startOp: '>',
+        startValue: parseFloat(latest.toFixed(1)),
+        startHoldS: 60,
+        endOp: '<=',
+        endValue: parseFloat(latest.toFixed(1)),
+        endHoldS: 120,
+        cooldownS: 300,
+      })
+      setName(`${metricLabel(metric)} threshold`)
+      return
+    }
     const fit = fitLevelRule(points, { fromMs: selection.from, toMs: selection.to }, metric)
     if ('error' in fit) {
       setFitError(fit.error)
@@ -122,7 +149,7 @@ export function AlertWizard({ meta, config, channels, readings, selection, open,
     })
     setName(`${metricLabel(metric)} event`)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, metric, points, selection.from, selection.to])
+  }, [open, metric, points, selection?.from, selection?.to])
 
   // 7-day history for the backtest strip, fetched once per metric
   useEffect(() => {
@@ -192,7 +219,7 @@ export function AlertWizard({ meta, config, channels, readings, selection, open,
         <Modal.Container size="lg">
           <Modal.Dialog>
             <Modal.Header>
-              <Modal.Heading>New alert from selection</Modal.Heading>
+              <Modal.Heading>{selection ? 'New alert from selection' : 'New alert'}</Modal.Heading>
             </Modal.Header>
             <Modal.Body className="space-y-4">
               <div className="flex items-center gap-2">
@@ -205,8 +232,9 @@ export function AlertWizard({ meta, config, channels, readings, selection, open,
                   ))}
                 </select>
                 <span className="text-xs text-muted-foreground">
-                  fitted from {new Date(selection.from).toLocaleString()} –{' '}
-                  {new Date(selection.to).toLocaleString()}
+                  {selection
+                    ? `fitted from ${new Date(selection.from).toLocaleString()} – ${new Date(selection.to).toLocaleString()}`
+                    : 'tip: drag on the chart first and Sensify will fit these values for you'}
                 </span>
               </div>
 
