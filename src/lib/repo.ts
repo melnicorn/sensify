@@ -1,5 +1,6 @@
 import { getDb } from './db'
 import { convertTemperature, parseUnitLabel } from './units'
+import { evaluateReading } from './alerts/engine'
 import type {
   SensorMeta,
   PullField,
@@ -220,6 +221,9 @@ export async function saveReading(
   })
   tx()
 
+  // Alert evaluation shares one code path with pull ingest (never throws)
+  for (const m of metrics) evaluateReading(input.sensorId, m.metric, m.value, now)
+
   return {
     id: crypto.randomUUID(),
     timestamp: now,
@@ -318,6 +322,10 @@ export async function recordPollSuccess(
     ).run(now, now, sample, softError, sensorId)
   })
   tx()
+
+  // Alert evaluation shares one code path with push ingest (never throws)
+  for (const m of metrics) evaluateReading(sensorId, m.metric, m.value, now)
+
   return now
 }
 
