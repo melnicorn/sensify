@@ -22,7 +22,11 @@ Related work committed to `main` just before this branch:
 | 8 | `666cd6d` | Create-alert wizard: drag selection → editable sentence → 7-day backtest strip → channels → save; auto-picks the best-fitting metric |
 | 9 | `97c4edc` | Alerts management UI: `/alerts` page (rules + event history), per-sensor alerts card, pause/resume/delete |
 | 10 | `87cf426` | Docs (README alerts section, feature bullets), manual "New alert" path (no selection needed, e.g. plain humidity thresholds), wizard edit-clobber guard; live E2E: mock device → poller → engine → real Telegram delivery confirmed |
-| 11 | HEAD | Vitest test suite (49 tests): machine core, fit/backtest against the captured wash-cycle fixture, unit registry, JSON paths, rule descriptions, and engine integration on a real temp SQLite DB; wired into CI before build |
+| 11 | `e2ebf61` | Vitest test suite (49 tests): machine core, fit/backtest against the captured wash-cycle fixture, unit registry, JSON paths, rule descriptions, and engine integration on a real temp SQLite DB; wired into CI before build |
+| 12 | `bc8a204` | Rule `updated_at` made strictly monotonic (definition-version race found by a flaky test) |
+| 13 | `6fef003` | Pattern derivation library: five standard shapes derive level-rule params from median + k·MAD of the sensor's own history (no example event needed) |
+| 14 | `888e1d5` | Null message template suppresses that transition's notification (level shifts fire on start only) |
+| 15 | HEAD | Wizard pattern gallery: glyph cards + sensitivity slider with derived-threshold readout, notify on/off toggles per message |
 
 ## Notes
 

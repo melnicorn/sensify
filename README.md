@@ -89,7 +89,7 @@ If the UI has set a desired reporting interval for the device, the response incl
 Sensify can watch any metric and message you when something starts and when it finishes — a washing machine cycle, a humidity threshold, a freezer warming up.
 
 1. In **Settings → Notification channels**, add a Telegram bot (token from [@BotFather](https://t.me/BotFather)) and the chat ID it should message, then hit **Test**.
-2. Open a sensor, drag across the chart to select one example of the event (include some quiet time around it), and click **Create alert**.
+2. Open a sensor, drag across the chart to select one example of the event (include some quiet time around it), and click **Create alert**. No example yet? Hit **New alert** and pick a pattern (cycle, spike, dip, level shift) — thresholds are derived from the sensor's own history using robust statistics, with a sensitivity slider.
 3. Sensify fits a trigger from the selection — threshold, smoothing, and debounce — and shows it as an editable sentence like *"Start when average over 2 min is > 8 W holding for 60 s; end when it stays ≤ 8 W for 3 min."*
 4. The backtest strip replays the rule over the last 7 days so you can see exactly which events it would have caught before saving.
 

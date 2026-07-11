@@ -8,6 +8,12 @@ import { useState, useEffect, useMemo, useRef, useTransition } from 'react'
 import { Button, Modal } from '@heroui/react'
 import { AlertTriangle } from 'lucide-react'
 import { fitLevelRule, backtestRule, type BacktestEvent } from '@/lib/alerts/fit'
+import {
+  PATTERNS,
+  derivePatternRule,
+  type PatternId,
+  type Sensitivity,
+} from '@/lib/alerts/patterns'
 import type { RuleDefinition, Agg, Op } from '@/lib/alerts/schemas'
 import type { SignalPoint } from '@/lib/alerts/machine'
 import { createRuleAction } from '@/app/alerts-actions'
@@ -45,6 +51,30 @@ const selectClass =
   'rounded-md border border-input bg-card px-2 py-1 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary'
 const numClass = `${selectClass} w-20 tabular-nums`
 
+// Left-to-right slider order: the further right, the more easily it fires
+const SENSITIVITIES: Sensitivity[] = ['low', 'medium', 'high']
+const SENSITIVITY_LABEL: Record<Sensitivity, string> = {
+  low: 'Low — only extreme deviations',
+  medium: 'Medium',
+  high: 'High — fires on small deviations',
+}
+
+const GLYPHS: Record<PatternId, string> = {
+  pulse: '0,34 40,34 44,10 52,14 60,8 70,15 80,9 92,13 100,8 108,12 112,34 160,34',
+  spike: '0,28 30,26 50,29 66,27 76,8 86,5 96,9 106,26 130,28 160,27',
+  dip: '0,12 30,14 50,11 66,13 76,32 86,35 96,31 106,14 130,12 160,13',
+  'rise-hold': '0,34 60,34 66,10 100,9 130,11 160,10',
+  'fall-hold': '0,10 60,9 66,33 100,34 130,33 160,34',
+}
+
+function PatternGlyph({ id }: { id: PatternId }) {
+  return (
+    <svg viewBox="0 0 160 40" className="w-full text-primary" aria-hidden="true">
+      <polyline fill="none" stroke="currentColor" strokeWidth={2.5} points={GLYPHS[id]} />
+    </svg>
+  )
+}
+
 function fmtDuration(ms: number): string {
   const mins = Math.round(ms / 60_000)
   if (mins < 60) return `${mins}m`
@@ -75,6 +105,11 @@ export function AlertWizard({ meta, config, channels, readings, selection, open,
   })
   const [params, setParams] = useState<Params | null>(null)
   const [fitError, setFitError] = useState<string | null>(null)
+  const [pattern, setPattern] = useState<PatternId | null>(null)
+  const [sensitivity, setSensitivity] = useState<Sensitivity>('medium')
+  const [derivedThreshold, setDerivedThreshold] = useState<number | null>(null)
+  const [notifyStart, setNotifyStart] = useState(true)
+  const [notifyEnd, setNotifyEnd] = useState(true)
   const [name, setName] = useState('')
   const [onStart, setOnStart] = useState('')
   const [onEnd, setOnEnd] = useState('')
@@ -100,8 +135,10 @@ export function AlertWizard({ meta, config, channels, readings, selection, open,
     [readings, metric]
   )
 
-  // Fit once per metric/selection while open; manual mode seeds defaults.
-  // Keyed so live chart refreshes can't clobber the user's in-progress edits.
+  // Seed parameters once per (metric, selection, pattern, sensitivity) while
+  // open: fit from the dragged example, derive from a chosen pattern, or fall
+  // back to plain defaults. Keyed so live chart refreshes can't clobber the
+  // user's in-progress edits.
   const seededKey = useRef<string | null>(null)
   useEffect(() => {
     if (!open) {
@@ -109,47 +146,78 @@ export function AlertWizard({ meta, config, channels, readings, selection, open,
       return
     }
     if (!metric) return
-    const key = `${metric}:${selection?.from ?? ''}:${selection?.to ?? ''}`
+    const key = selection
+      ? `sel:${metric}:${selection.from}:${selection.to}`
+      : `pat:${metric}:${pattern ?? 'none'}:${sensitivity}`
     if (seededKey.current === key) return
     seededKey.current = key
-    if (!selection) {
-      const latest = points[points.length - 1]?.value ?? 0
+    setDerivedThreshold(null)
+
+    if (selection) {
+      const fit = fitLevelRule(points, { fromMs: selection.from, toMs: selection.to }, metric)
+      if ('error' in fit) {
+        setFitError(fit.error)
+        setParams(null)
+        return
+      }
       setFitError(null)
       setParams({
-        agg: 'avg',
-        windowS: 60,
-        startOp: '>',
-        startValue: parseFloat(latest.toFixed(1)),
-        startHoldS: 60,
-        endOp: '<=',
-        endValue: parseFloat(latest.toFixed(1)),
-        endHoldS: 120,
-        cooldownS: 300,
+        agg: fit.trigger.signal.agg,
+        windowS: fit.trigger.signal.windowS,
+        startOp: fit.trigger.start.op,
+        startValue: fit.trigger.start.value,
+        startHoldS: fit.trigger.start.holdS,
+        endOp: fit.trigger.end!.op,
+        endValue: fit.trigger.end!.value,
+        endHoldS: fit.trigger.end!.holdS,
+        cooldownS: fit.cooldownS,
       })
-      setName(`${metricLabel(metric)} threshold`)
+      setName(`${metricLabel(metric)} event`)
       return
     }
-    const fit = fitLevelRule(points, { fromMs: selection.from, toMs: selection.to }, metric)
-    if ('error' in fit) {
-      setFitError(fit.error)
-      setParams(null)
+
+    if (pattern) {
+      const spec = PATTERNS.find((p) => p.id === pattern)!
+      const derived = derivePatternRule(points, pattern, sensitivity, metric)
+      if ('error' in derived) {
+        setFitError(derived.error)
+        setParams(null)
+        return
+      }
+      setFitError(null)
+      setDerivedThreshold(derived.diagnostics.threshold)
+      setParams({
+        agg: derived.trigger.signal.agg,
+        windowS: derived.trigger.signal.windowS,
+        startOp: derived.trigger.start.op,
+        startValue: derived.trigger.start.value,
+        startHoldS: derived.trigger.start.holdS,
+        endOp: derived.trigger.end!.op,
+        endValue: derived.trigger.end!.value,
+        endHoldS: derived.trigger.end!.holdS,
+        cooldownS: derived.cooldownS,
+      })
+      setNotifyEnd(derived.notifyEnd)
+      setName(`${metricLabel(metric)} ${spec.label.toLowerCase()}`)
       return
     }
+
+    const latest = points[points.length - 1]?.value ?? 0
     setFitError(null)
     setParams({
-      agg: fit.trigger.signal.agg,
-      windowS: fit.trigger.signal.windowS,
-      startOp: fit.trigger.start.op,
-      startValue: fit.trigger.start.value,
-      startHoldS: fit.trigger.start.holdS,
-      endOp: fit.trigger.end!.op,
-      endValue: fit.trigger.end!.value,
-      endHoldS: fit.trigger.end!.holdS,
-      cooldownS: fit.cooldownS,
+      agg: 'avg',
+      windowS: 60,
+      startOp: '>',
+      startValue: parseFloat(latest.toFixed(1)),
+      startHoldS: 60,
+      endOp: '<=',
+      endValue: parseFloat(latest.toFixed(1)),
+      endHoldS: 120,
+      cooldownS: 300,
     })
-    setName(`${metricLabel(metric)} event`)
+    setName(`${metricLabel(metric)} threshold`)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, metric, points, selection?.from, selection?.to])
+  }, [open, metric, points, selection?.from, selection?.to, pattern, sensitivity])
 
   // 7-day history for the backtest strip, fetched once per metric
   useEffect(() => {
@@ -185,11 +253,11 @@ export function AlertWizard({ meta, config, channels, readings, selection, open,
       },
       cooldownS: params.cooldownS,
       notify: {
-        ...(onStart.trim() ? { onStart: onStart.trim() } : {}),
-        ...(onEnd.trim() ? { onEnd: onEnd.trim() } : {}),
+        ...(notifyStart ? (onStart.trim() ? { onStart: onStart.trim() } : {}) : { onStart: null }),
+        ...(notifyEnd ? (onEnd.trim() ? { onEnd: onEnd.trim() } : {}) : { onEnd: null }),
       },
     }
-  }, [params, metric, onStart, onEnd])
+  }, [params, metric, onStart, onEnd, notifyStart, notifyEnd])
 
   const backtest = useMemo<BacktestEvent[] | null>(() => {
     if (!definition || history === null) return null
@@ -237,6 +305,58 @@ export function AlertWizard({ meta, config, channels, readings, selection, open,
                     : 'tip: drag on the chart first and Sensify will fit these values for you'}
                 </span>
               </div>
+
+              {!selection && (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+                    {PATTERNS.map((spec) => (
+                      <button
+                        key={spec.id}
+                        onClick={() => setPattern(spec.id)}
+                        title={spec.blurb}
+                        className={`rounded-md border p-2 text-left transition-colors ${
+                          pattern === spec.id
+                            ? 'border-primary bg-primary/10'
+                            : 'border-border hover:border-primary/60'
+                        }`}
+                      >
+                        <PatternGlyph id={spec.id} />
+                        <span className="block text-xs text-foreground mt-1 leading-tight">
+                          {spec.label}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  {pattern && (
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-muted-foreground shrink-0">Sensitivity</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={2}
+                        step={1}
+                        value={SENSITIVITIES.indexOf(sensitivity)}
+                        onChange={(e) =>
+                          setSensitivity(SENSITIVITIES[parseInt(e.target.value, 10)]!)
+                        }
+                        className="flex-1"
+                        aria-label="Sensitivity"
+                      />
+                      <span className="text-xs text-foreground shrink-0">
+                        {SENSITIVITY_LABEL[sensitivity]}
+                        {derivedThreshold !== null &&
+                          ` · fires ${params?.startOp === '<' || params?.startOp === '<=' ? 'below' : 'above'} ${toDisplay(derivedThreshold)}${unitLabel ? ` ${unitLabel}` : ''}`}
+                      </span>
+                    </div>
+                  )}
+                  {pattern && (
+                    <p className="text-xs text-muted-foreground">
+                      Derived from this sensor’s recorded history (median + k·MAD). Fine-tune below
+                      and check the backtest.
+                    </p>
+                  )}
+                </div>
+              )}
 
               {fitError && (
                 <p className="flex items-center gap-1.5 text-sm text-amber-600 dark:text-amber-400">
@@ -392,23 +512,39 @@ export function AlertWizard({ meta, config, channels, readings, selection, open,
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-foreground">Start message</label>
+                  <label className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={notifyStart}
+                      onChange={(e) => setNotifyStart(e.target.checked)}
+                    />
+                    Start message
+                  </label>
                   <input
                     value={onStart}
                     onChange={(e) => setOnStart(e.target.value)}
                     placeholder="▶ {metric} is {value} on {sensor}"
                     maxLength={500}
-                    className={`${selectClass} w-full`}
+                    disabled={!notifyStart}
+                    className={`${selectClass} w-full ${notifyStart ? '' : 'opacity-50'}`}
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-foreground">End message</label>
+                  <label className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={notifyEnd}
+                      onChange={(e) => setNotifyEnd(e.target.checked)}
+                    />
+                    End message
+                  </label>
                   <input
                     value={onEnd}
                     onChange={(e) => setOnEnd(e.target.value)}
                     placeholder="✅ Finished after {duration} — {metric} peaked at {max}"
                     maxLength={500}
-                    className={`${selectClass} w-full`}
+                    disabled={!notifyEnd}
+                    className={`${selectClass} w-full ${notifyEnd ? '' : 'opacity-50'}`}
                   />
                 </div>
               </div>
