@@ -209,13 +209,24 @@ export async function createRule(input: {
   return id
 }
 
+/** updated_at doubles as the definition version the engine keys rule state
+ *  to, so it must strictly increase even for edits within one millisecond. */
+function bumpedUpdatedAt(db: ReturnType<typeof getDb>, id: string): string {
+  const row = db.prepare('SELECT updated_at FROM alert_rules WHERE id = ?').get(id) as
+    | { updated_at: string }
+    | undefined
+  const now = new Date().toISOString()
+  if (!row || now > row.updated_at) return now
+  return new Date(Date.parse(row.updated_at) + 1).toISOString()
+}
+
 export async function updateRule(
   id: string,
   input: { name: string; definition: RuleDefinition; channelIds: string[] }
 ): Promise<void> {
   const db = getDb()
-  const now = new Date().toISOString()
   const tx = db.transaction(() => {
+    const now = bumpedUpdatedAt(db, id)
     const result = db
       .prepare('UPDATE alert_rules SET name = ?, definition = ?, updated_at = ? WHERE id = ?')
       .run(input.name, JSON.stringify(input.definition), now, id)
@@ -230,9 +241,10 @@ export async function updateRule(
 }
 
 export async function setRuleEnabled(id: string, enabled: boolean): Promise<void> {
-  const result = getDb()
+  const db = getDb()
+  const result = db
     .prepare('UPDATE alert_rules SET enabled = ?, updated_at = ? WHERE id = ?')
-    .run(enabled ? 1 : 0, new Date().toISOString(), id)
+    .run(enabled ? 1 : 0, bumpedUpdatedAt(db, id), id)
   if (result.changes === 0) throw new Error(`Alert rule ${id} not found`)
 }
 
