@@ -41,10 +41,12 @@ export const RuleDefinitionSchema = z.object({
   v: z.literal(1),
   trigger: TriggerSchema,
   cooldownS: z.number().int().min(0).max(86400).default(0),
+  // Message templates: absent = built-in default, null = that notification
+  // is disabled (level-shift patterns fire on start only)
   notify: z
     .object({
-      onStart: z.string().max(500).optional(),
-      onEnd: z.string().max(500).optional(),
+      onStart: z.string().max(500).nullable().optional(),
+      onEnd: z.string().max(500).nullable().optional(),
     })
     .default({}),
 })

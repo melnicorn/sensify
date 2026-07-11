@@ -240,6 +240,9 @@ async function notifyTransition(
   transition: Transition,
   eventId: string | null
 ): Promise<void> {
+  const configured = transition.type === 'start' ? def.notify.onStart : def.notify.onEnd
+  if (configured === null) return // explicitly disabled for this transition
+
   const sensor = getDb().prepare('SELECT name FROM sensors WHERE id = ?').get(rule.sensorId) as
     | { name: string }
     | undefined
@@ -265,8 +268,7 @@ async function notifyTransition(
     vars.ended_at = new Date(event.endedAt).toLocaleString()
   }
 
-  const template =
-    transition.type === 'start' ? (def.notify.onStart ?? DEFAULT_START) : (def.notify.onEnd ?? DEFAULT_END)
+  const template = configured ?? (transition.type === 'start' ? DEFAULT_START : DEFAULT_END)
   const message = renderTemplate(template, vars)
   await deliver(rule, transition.type, message)
 }

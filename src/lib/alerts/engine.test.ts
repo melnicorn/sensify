@@ -1,7 +1,7 @@
 // Integration tests for the live engine against a real (temporary) SQLite
 // database — the same code path production ingest uses. DATA_DIR must be set
 // before the db module loads, hence the dynamic imports.
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -111,6 +111,33 @@ describe('engine end to end', () => {
     expect(getRuleState(ruleId)?.phase).toBe('idle')
     const events = await listEventsForRule(ruleId)
     expect(events[0]!.endedAt).toBe(new Date(now - 70_000).toISOString())
+  })
+
+  it('a null template suppresses that transition notification', async () => {
+    const sensorId = newSensor()
+    const ruleId = await createRule({
+      sensorId,
+      name: 'Quiet end',
+      definition: { ...DEF, notify: { onEnd: null } },
+      channelIds: [],
+    })
+    const spy = vi.spyOn(console, 'log')
+
+    const t0 = Date.now() - 600_000
+    ingest(sensorId, t0, 50)
+    ingest(sensorId, t0 + 40_000, 60) // start fires
+    ingest(sensorId, t0 + 70_000, 1)
+    ingest(sensorId, t0 + 140_000, 1) // end transition, notification suppressed
+    await new Promise((r) => setTimeout(r, 50)) // async notify settles
+
+    const logged = spy.mock.calls.map((args) => String(args[0])).join('\n')
+    spy.mockRestore()
+    expect(logged).toContain('[alert:start]')
+    expect(logged).not.toContain('[alert:end]')
+    // The event itself is still recorded — only the message is suppressed
+    const events = await listEventsForRule(ruleId)
+    expect(events).toHaveLength(1)
+    expect(events[0]!.endedAt).not.toBeNull()
   })
 
   it('an invalid stored definition disables the rule without breaking ingest', async () => {
