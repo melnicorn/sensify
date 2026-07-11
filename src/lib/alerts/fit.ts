@@ -60,12 +60,29 @@ export function fitLevelRule(
   const baseMedian = percentile(baseSorted, 0.5)
 
   const direction: 'above' | 'below' = selMedian >= baseMedian ? 'above' : 'below'
-  // The busy tail of the baseline vs the quiet tail of the selection: the
-  // threshold must separate these two levels
+  // The busy tail of the baseline: the threshold must sit above (below) it
   const baselineLevel =
     direction === 'above' ? percentile(baseSorted, 0.95) : percentile(baseSorted, 0.05)
+
+  // Drags are sloppy: trim leading/trailing samples that still look like
+  // baseline so padding inside the selection can't poison the percentiles.
+  // Interior dips are kept — they inform the smoothing window and end dwell.
+  const isBaselineLike = (v: number) =>
+    direction === 'above' ? v <= baselineLevel : v >= baselineLevel
+  let coreFrom = 0
+  while (coreFrom < inSel.length && isBaselineLike(inSel[coreFrom]!.value)) coreFrom++
+  let coreTo = inSel.length - 1
+  while (coreTo >= coreFrom && isBaselineLike(inSel[coreTo]!.value)) coreTo--
+  const trimmed = inSel.slice(coreFrom, coreTo + 1)
+  if (trimmed.length < 3) {
+    return {
+      error:
+        'The selected period does not stand out from its surroundings — try selecting one clear event with some quiet time around it',
+    }
+  }
+  const trimmedSorted = trimmed.map((p) => p.value).sort((a, b) => a - b)
   const activeLevel =
-    direction === 'above' ? percentile(selSorted, 0.1) : percentile(selSorted, 0.9)
+    direction === 'above' ? percentile(trimmedSorted, 0.1) : percentile(trimmedSorted, 0.9)
 
   const gap = direction === 'above' ? activeLevel - baselineLevel : baselineLevel - activeLevel
   if (!(gap > 0)) {
@@ -87,23 +104,23 @@ export function fitLevelRule(
   const startCond = { op, value: threshold, holdS: 0 }
 
   // Median sampling interval informs the dwell defaults
-  const intervals = inSel
+  const intervals = trimmed
     .slice(1)
-    .map((p, i) => (p.tsMs - inSel[i]!.tsMs) / 1000)
+    .map((p, i) => (p.tsMs - trimmed[i]!.tsMs) / 1000)
     .sort((a, b) => a - b)
   const sampleS = percentile(intervals, 0.5) || 30
 
-  // Trim the selection to its tripping core (drag edges include baseline)
-  const firstTrip = inSel.findIndex((p) => conditionMet(startCond, p.value))
+  // Narrow further to the span that actually crosses the fitted threshold
+  const firstTrip = trimmed.findIndex((p) => conditionMet(startCond, p.value))
   let lastTrip = -1
-  for (let i = inSel.length - 1; i >= 0; i--) {
-    if (conditionMet(startCond, inSel[i]!.value)) {
+  for (let i = trimmed.length - 1; i >= 0; i--) {
+    if (conditionMet(startCond, trimmed[i]!.value)) {
       lastTrip = i
       break
     }
   }
   if (firstTrip === -1) return { error: 'No readings in the selection cross the fitted threshold' }
-  const core = inSel.slice(firstTrip, lastTrip + 1)
+  const core = trimmed.slice(firstTrip, lastTrip + 1)
 
   // Smoothing window: smallest ladder step whose time-weighted average never
   // crosses back over the threshold inside the event core

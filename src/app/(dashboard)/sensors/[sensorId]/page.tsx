@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Wifi, Download, Upload } from 'lucide-react'
 import { getSensorMeta, getReadings, getConfig } from '@/lib/storage'
+import { listChannels } from '@/lib/alerts/repo'
 import { SensorChartLive } from '@/components/sensor-chart-live'
 import { DeleteSensorButton } from '@/components/delete-sensor-button'
 import { SensorMetaPanel } from '@/components/sensor-meta-panel'
@@ -27,7 +28,11 @@ export default async function SensorDetailPage({
   const { range: rawRange } = await searchParams
   const range = rawRange && rawRange in RANGES ? rawRange : '7d'
 
-  const [meta, config] = await Promise.all([getSensorMeta(sensorId), getConfig()])
+  const [meta, config, channels] = await Promise.all([
+    getSensorMeta(sensorId),
+    getConfig(),
+    listChannels(),
+  ])
   if (!meta) notFound()
 
   const now = new Date()
@@ -113,6 +118,7 @@ export default async function SensorDetailPage({
         range={range}
         initialReadings={readings}
         config={config}
+        channels={channels}
       />
     </div>
   )

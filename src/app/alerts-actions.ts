@@ -7,8 +7,10 @@ import {
   updateChannel,
   deleteChannel,
   getChannel,
+  createRule,
 } from '@/lib/alerts/repo'
 import { sendToChannel } from '@/lib/alerts/channels'
+import { RuleDefinitionSchema } from '@/lib/alerts/schemas'
 
 export interface ChannelFormResult {
   error?: string
@@ -61,6 +63,31 @@ export async function updateChannelAction(
 export async function deleteChannelAction(channelId: string): Promise<void> {
   await deleteChannel(channelId)
   revalidatePath('/settings')
+}
+
+// ---------- alert rules ----------
+
+const CreateRuleSchema = z.object({
+  sensorId: z.string().min(1).max(64),
+  name: z.string().trim().min(1, 'Name is required').max(128),
+  definition: RuleDefinitionSchema,
+  channelIds: z.array(z.string().uuid()).max(20),
+})
+
+export async function createRuleAction(
+  input: unknown
+): Promise<{ id?: string; error?: string }> {
+  const result = CreateRuleSchema.safeParse(input)
+  if (!result.success) {
+    return { error: result.error.issues[0]?.message ?? 'Invalid alert rule' }
+  }
+  try {
+    const id = await createRule(result.data)
+    revalidatePath(`/sensors/${result.data.sensorId}`)
+    return { id }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Failed to create alert' }
+  }
 }
 
 export async function testChannelAction(

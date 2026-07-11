@@ -1,9 +1,11 @@
 'use client'
 
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { X } from 'lucide-react'
+import { BellPlus, X } from 'lucide-react'
 import { SensorChart, type TimeSelection } from './sensor-chart'
 import { ExportMenu } from './export-menu'
+import { AlertWizard } from './alert-wizard'
+import type { Channel } from '@/lib/alerts/repo'
 import type { MetricReading, SensorMeta, AppConfig } from '@/lib/types'
 
 // Widest ranges refresh least aggressively — a single new point barely moves them
@@ -43,11 +45,13 @@ interface Props {
   range: string
   initialReadings: MetricReading[]
   config: AppConfig
+  channels: Channel[]
 }
 
-export function SensorChartLive({ meta, range, initialReadings, config }: Props) {
+export function SensorChartLive({ meta, range, initialReadings, config, channels }: Props) {
   const [readings, setReadings] = useState(initialReadings)
   const [selection, setSelection] = useState<TimeSelection | null>(null)
+  const [wizardOpen, setWizardOpen] = useState(false)
   const [pulse, setPulse] = useState(false)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -105,6 +109,13 @@ export function SensorChartLive({ meta, range, initialReadings, config }: Props)
             >
               <X size={12} />
             </button>
+            <button
+              onClick={() => setWizardOpen(true)}
+              className="flex items-center gap-1 px-2 py-1 rounded-md bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+            >
+              <BellPlus size={12} />
+              Create alert
+            </button>
           </span>
         )}
         <span className="text-xs text-muted-foreground">{pointCount} readings</span>
@@ -128,6 +139,17 @@ export function SensorChartLive({ meta, range, initialReadings, config }: Props)
         selection={selection}
         onSelectionChange={setSelection}
       />
+      {selection && (
+        <AlertWizard
+          meta={meta}
+          config={config}
+          channels={channels}
+          readings={readings}
+          selection={selection}
+          open={wizardOpen}
+          onClose={() => setWizardOpen(false)}
+        />
+      )}
     </div>
   )
 }
