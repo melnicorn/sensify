@@ -6,7 +6,13 @@ const DATA_DIR = process.env.DATA_DIR ?? path.join(process.cwd(), 'data')
 
 let db: Database.Database | null = null
 
-const SCHEMA = `
+// Versioned migrations tracked via PRAGMA user_version. Each entry runs once,
+// in order, inside a transaction. Never edit an entry after it has shipped —
+// append a new one. Migration 1 uses IF NOT EXISTS because it describes the
+// schema that existed before versioning (deployed DBs report user_version 0).
+const MIGRATIONS: string[] = [
+  // 1: baseline schema
+  `
 CREATE TABLE IF NOT EXISTS sensors (
   id TEXT PRIMARY KEY,
   type TEXT NOT NULL DEFAULT 'push' CHECK (type IN ('push', 'pull')),
@@ -52,7 +58,19 @@ CREATE TABLE IF NOT EXISTS config (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
-`
+`,
+]
+
+function migrate(database: Database.Database): void {
+  const current = database.pragma('user_version', { simple: true }) as number
+  for (let v = current; v < MIGRATIONS.length; v++) {
+    const apply = database.transaction(() => {
+      database.exec(MIGRATIONS[v]!)
+      database.pragma(`user_version = ${v + 1}`)
+    })
+    apply()
+  }
+}
 
 export function getDb(): Database.Database {
   if (db) return db
@@ -62,6 +80,6 @@ export function getDb(): Database.Database {
   db.pragma('synchronous = NORMAL')
   db.pragma('busy_timeout = 5000')
   db.pragma('foreign_keys = ON')
-  db.exec(SCHEMA)
+  migrate(db)
   return db
 }
