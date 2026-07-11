@@ -15,9 +15,11 @@ import {
   closeEvent,
   updateEventStats,
   getEvent,
+  getChannel,
   recordRuleError,
   type AlertRule,
 } from './repo'
+import { sendToChannel } from './channels'
 import {
   computeSignal,
   stepMachine,
@@ -229,8 +231,8 @@ export function renderTemplate(template: string, vars: Record<string, string>): 
   return template.replace(/\{(\w+)\}/g, (m, key: string) => vars[key] ?? m)
 }
 
-const DEFAULT_START = '▶ {rule}: {metric} is {value} on {sensor}'
-const DEFAULT_END = '✅ {rule}: finished after {duration} ({metric} peaked at {max}) on {sensor}'
+const DEFAULT_START = '▶ {metric} is {value} on {sensor}'
+const DEFAULT_END = '✅ Finished after {duration} — {metric} peaked at {max} on {sensor}'
 
 async function notifyTransition(
   rule: AlertRule,
@@ -269,6 +271,23 @@ async function notifyTransition(
   await deliver(rule, transition.type, message)
 }
 
+/** Fan a rendered message out to the rule's channels. Failures are recorded
+ *  per channel; an aggregate error propagates to the rule's last_error. */
+async function deliver(rule: AlertRule, kind: 'start' | 'end', text: string): Promise<void> {
+  console.log(`[alert:${kind}] ${rule.name}: ${text}`)
+  const failures: string[] = []
+  for (const channelId of rule.channelIds) {
+    const channel = await getChannel(channelId)
+    if (!channel) continue
+    try {
+      await sendToChannel(channel, { title: rule.name, text })
+    } catch (err) {
+      failures.push(err instanceof Error ? err.message : String(err))
+    }
+  }
+  if (failures.length > 0) throw new Error(failures.join('; '))
+}
+
 function lastClosedEvent(ruleId: string) {
   const row = getDb()
     .prepare(
@@ -278,9 +297,3 @@ function lastClosedEvent(ruleId: string) {
   return row ? getEvent(row.id) : null
 }
 
-/** Delivery is log-only until the channel drivers land (next step). */
-async function deliver(rule: AlertRule, kind: 'start' | 'end', message: string): Promise<void> {
-  console.log(
-    `[alert:${kind}] ${message} — rule ${rule.id}, channels [${rule.channelIds.join(', ') || 'none'}]`
-  )
-}
