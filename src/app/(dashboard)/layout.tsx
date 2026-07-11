@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Activity, Settings, BookOpen } from 'lucide-react'
+import { Activity, Bell, Settings, BookOpen } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme-toggle'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -19,6 +19,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           >
             <Activity size={16} />
             <span className="hidden sm:inline">Sensors</span>
+          </Link>
+          <Link
+            href="/alerts"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Bell size={16} />
+            <span className="hidden sm:inline">Alerts</span>
           </Link>
           <Link
             href="/settings"

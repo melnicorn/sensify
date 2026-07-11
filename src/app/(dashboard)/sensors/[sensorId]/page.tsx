@@ -2,7 +2,9 @@ import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Wifi, Download, Upload } from 'lucide-react'
 import { getSensorMeta, getReadings, getConfig } from '@/lib/storage'
-import { listChannels } from '@/lib/alerts/repo'
+import { listChannels, listRulesForSensor } from '@/lib/alerts/repo'
+import { buildRuleViews } from '@/lib/alerts/views'
+import { AlertRulesList } from '@/components/alert-rules-list'
 import { SensorChartLive } from '@/components/sensor-chart-live'
 import { DeleteSensorButton } from '@/components/delete-sensor-button'
 import { SensorMetaPanel } from '@/components/sensor-meta-panel'
@@ -28,12 +30,14 @@ export default async function SensorDetailPage({
   const { range: rawRange } = await searchParams
   const range = rawRange && rawRange in RANGES ? rawRange : '7d'
 
-  const [meta, config, channels] = await Promise.all([
+  const [meta, config, channels, sensorRules] = await Promise.all([
     getSensorMeta(sensorId),
     getConfig(),
     listChannels(),
+    listRulesForSensor(sensorId),
   ])
   if (!meta) notFound()
+  const ruleViews = await buildRuleViews(sensorRules)
 
   const now = new Date()
   const from = new Date(now.getTime() - RANGES[range]!.hours * 3_600_000)
@@ -94,6 +98,14 @@ export default async function SensorDetailPage({
           <SensorIntervalForm desiredInterval={meta.desiredInterval} setAction={intervalAction} />
         )}
       </div>
+
+      {/* Alerts on this sensor */}
+      {ruleViews.length > 0 && (
+        <div className="rounded-lg border border-border bg-card p-4">
+          <h2 className="text-sm font-semibold text-foreground mb-1">Alerts</h2>
+          <AlertRulesList rules={ruleViews} />
+        </div>
+      )}
 
       {/* Chart controls */}
       <div className="flex items-center gap-2">

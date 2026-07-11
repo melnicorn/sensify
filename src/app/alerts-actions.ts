@@ -8,6 +8,9 @@ import {
   deleteChannel,
   getChannel,
   createRule,
+  setRuleEnabled,
+  deleteRule,
+  getRule,
 } from '@/lib/alerts/repo'
 import { sendToChannel } from '@/lib/alerts/channels'
 import { RuleDefinitionSchema } from '@/lib/alerts/schemas'
@@ -88,6 +91,20 @@ export async function createRuleAction(
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Failed to create alert' }
   }
+}
+
+export async function setRuleEnabledAction(ruleId: string, enabled: boolean): Promise<void> {
+  const rule = await getRule(ruleId)
+  await setRuleEnabled(ruleId, enabled)
+  revalidatePath('/alerts')
+  if (rule) revalidatePath(`/sensors/${rule.sensorId}`)
+}
+
+export async function deleteRuleAction(ruleId: string): Promise<void> {
+  const rule = await getRule(ruleId)
+  await deleteRule(ruleId)
+  revalidatePath('/alerts')
+  if (rule) revalidatePath(`/sensors/${rule.sensorId}`)
 }
 
 export async function testChannelAction(
