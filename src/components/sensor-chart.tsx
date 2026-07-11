@@ -9,22 +9,30 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
+  ReferenceArea,
   ResponsiveContainer,
 } from 'recharts'
 import type { MetricReading, SensorMeta, AppConfig } from '@/lib/types'
 import { convertTemperature, metricLabel } from '@/lib/units'
 
+export interface TimeSelection {
+  from: number // epoch ms
+  to: number // epoch ms
+}
+
 interface Props {
   readings: MetricReading[]
   meta: SensorMeta
   config: AppConfig
+  selection?: TimeSelection | null
+  onSelectionChange?: (selection: TimeSelection | null) => void
 }
 
 interface Series {
   metric: string
   title: string
   unitLabel: string
-  points: { time: string; value: number }[]
+  points: { ts: number; value: number }[]
 }
 
 function buildSeries(readings: MetricReading[], meta: SensorMeta, config: AppConfig): Series[] {
@@ -49,12 +57,7 @@ function buildSeries(readings: MetricReading[], meta: SensorMeta, config: AppCon
       title: unit ? `${metricLabel(metric)} (${unit})` : metricLabel(metric),
       unitLabel: unit,
       points: rows.map((r) => ({
-        time: new Date(r.ts).toLocaleString(undefined, {
-          month: 'short',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
+        ts: Date.parse(r.ts),
         value: parseFloat(
           (isPushTemp
             ? convertTemperature(r.value, 'C', config.temperatureUnit)
@@ -78,14 +81,25 @@ function buildSeries(readings: MetricReading[], meta: SensorMeta, config: AppCon
   return series
 }
 
+function formatTick(ts: number): string {
+  return new Date(ts).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 const LINE_COLORS = {
   light: ['#2563eb', '#0891b2', '#d97706', '#7c3aed', '#059669', '#dc2626'],
   dark: ['#22d3ee', '#67e8f9', '#fbbf24', '#a78bfa', '#34d399', '#f87171'],
 }
 
-export function SensorChart({ readings, meta, config }: Props) {
+export function SensorChart({ readings, meta, config, selection, onSelectionChange }: Props) {
   const { resolvedTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
+  // In-progress click-drag on any of the metric charts (they share a time axis)
+  const [drag, setDrag] = useState<{ start: number; end: number } | null>(null)
   useEffect(() => setMounted(true), [])
 
   if (!mounted) return <div className="h-64 rounded-lg bg-muted animate-pulse" />
@@ -96,6 +110,7 @@ export function SensorChart({ readings, meta, config }: Props) {
     text: isDark ? '#a5f3fc' : '#64748b',
     tooltip: isDark ? '#0a2329' : '#ffffff',
     tooltipBorder: isDark ? '#164e63' : '#e2e8f0',
+    selection: isDark ? '#22d3ee' : '#2563eb',
   }
   const palette = isDark ? LINE_COLORS.dark : LINE_COLORS.light
 
@@ -108,6 +123,43 @@ export function SensorChart({ readings, meta, config }: Props) {
   }
 
   const series = buildSeries(readings, meta, config)
+  const selectable = onSelectionChange !== undefined
+
+  const activeTs = (e: unknown): number | null => {
+    const label = (e as { activeLabel?: string | number } | null)?.activeLabel
+    if (label === undefined || label === null) return null
+    const ts = Number(label)
+    return isNaN(ts) ? null : ts
+  }
+
+  const handleMouseDown = (e: unknown) => {
+    if (!selectable) return
+    const ts = activeTs(e)
+    if (ts !== null) setDrag({ start: ts, end: ts })
+  }
+
+  const handleMouseMove = (e: unknown) => {
+    if (!drag) return
+    const ts = activeTs(e)
+    if (ts !== null && ts !== drag.end) setDrag({ start: drag.start, end: ts })
+  }
+
+  const handleMouseUp = () => {
+    if (!drag) return
+    // A click without dragging clears any existing selection
+    if (drag.start === drag.end) onSelectionChange?.(null)
+    else
+      onSelectionChange?.({
+        from: Math.min(drag.start, drag.end),
+        to: Math.max(drag.start, drag.end),
+      })
+    setDrag(null)
+  }
+
+  // The pending drag takes visual precedence over a committed selection
+  const highlight = drag
+    ? { from: Math.min(drag.start, drag.end), to: Math.max(drag.start, drag.end) }
+    : (selection ?? null)
 
   const commonAxis = {
     tick: { fill: colors.text, fontSize: 11 },
@@ -118,12 +170,27 @@ export function SensorChart({ readings, meta, config }: Props) {
   return (
     <div className="space-y-6">
       {series.map((s, i) => (
-        <div key={s.metric}>
+        <div key={s.metric} className={selectable ? 'select-none [&_svg]:cursor-crosshair' : ''}>
           <h3 className="text-sm font-medium text-muted-foreground mb-2">{s.title}</h3>
           <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={s.points} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
+            <LineChart
+              data={s.points}
+              margin={{ top: 4, right: 16, left: 0, bottom: 4 }}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+            >
               <CartesianGrid strokeDasharray="3 3" stroke={colors.grid} />
-              <XAxis dataKey="time" {...commonAxis} interval="preserveStartEnd" />
+              <XAxis
+                dataKey="ts"
+                type="number"
+                domain={['dataMin', 'dataMax']}
+                tickFormatter={formatTick}
+                {...commonAxis}
+                interval="preserveStartEnd"
+                minTickGap={40}
+              />
               <YAxis
                 {...commonAxis}
                 width={60}
@@ -140,11 +207,23 @@ export function SensorChart({ readings, meta, config }: Props) {
                   fontSize: 12,
                   color: isDark ? '#ecfeff' : '#0f172a',
                 }}
+                labelFormatter={(ts: number) => new Date(ts).toLocaleString()}
                 formatter={(v: number) => [
                   s.unitLabel ? `${v} ${s.unitLabel}` : String(v),
                   metricLabel(s.metric),
                 ]}
               />
+              {highlight && (
+                <ReferenceArea
+                  x1={highlight.from}
+                  x2={highlight.to}
+                  ifOverflow="visible"
+                  fill={colors.selection}
+                  fillOpacity={0.12}
+                  stroke={colors.selection}
+                  strokeOpacity={0.4}
+                />
+              )}
               <Line
                 type="monotone"
                 dataKey="value"

@@ -323,15 +323,22 @@ export async function recordPollFailure(sensorId: string, error: string): Promis
 
 export async function getReadings(
   sensorId: string,
-  fromTs: string,
-  toTs: string
+  fromTs?: string,
+  toTs?: string
 ): Promise<MetricReading[]> {
+  const where = ['sensor_id = ?']
+  const params: string[] = [sensorId]
+  if (fromTs) {
+    where.push('ts >= ?')
+    params.push(fromTs)
+  }
+  if (toTs) {
+    where.push('ts <= ?')
+    params.push(toTs)
+  }
   return getDb()
-    .prepare(
-      `SELECT ts, metric, value FROM readings
-       WHERE sensor_id = ? AND ts >= ? AND ts <= ? ORDER BY ts`
-    )
-    .all(sensorId, fromTs, toTs) as MetricReading[]
+    .prepare(`SELECT ts, metric, value FROM readings WHERE ${where.join(' AND ')} ORDER BY ts`)
+    .all(...params) as MetricReading[]
 }
 
 /** Most recent value of each metric for a sensor. */
