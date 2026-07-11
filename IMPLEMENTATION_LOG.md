@@ -21,7 +21,8 @@ Related work committed to `main` just before this branch:
 | 7 | `8071caf` | Fit + backtest library: selection → fitted rule params (baseline-edge trimming); rule + history → detected events via the exact engine core |
 | 8 | `666cd6d` | Create-alert wizard: drag selection → editable sentence → 7-day backtest strip → channels → save; auto-picks the best-fitting metric |
 | 9 | `97c4edc` | Alerts management UI: `/alerts` page (rules + event history), per-sensor alerts card, pause/resume/delete |
-| 10 | HEAD | Docs (README alerts section, feature bullets), manual "New alert" path (no selection needed, e.g. plain humidity thresholds), wizard edit-clobber guard; live E2E: mock device → poller → engine → real Telegram delivery confirmed |
+| 10 | `87cf426` | Docs (README alerts section, feature bullets), manual "New alert" path (no selection needed, e.g. plain humidity thresholds), wizard edit-clobber guard; live E2E: mock device → poller → engine → real Telegram delivery confirmed |
+| 11 | HEAD | Vitest test suite (49 tests): machine core, fit/backtest against the captured wash-cycle fixture, unit registry, JSON paths, rule descriptions, and engine integration on a real temp SQLite DB; wired into CI before build |
 
 ## Notes
 

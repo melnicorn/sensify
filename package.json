@@ -8,6 +8,8 @@
     "build": "next build",
     "start": "next start",
     "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "poller": "tsx src/poller/index.ts",
     "poller:dev": "tsx watch src/poller/index.ts"
   },
@@ -33,7 +35,8 @@
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
     "tailwindcss": "^4.1.7",
-    "typescript": "5.9.2"
+    "typescript": "5.9.2",
+    "vitest": "^4.1.10"
   },
   "packageManager": "pnpm@11.1.1",
   "engines": {
