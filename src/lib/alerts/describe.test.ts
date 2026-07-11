@@ -35,4 +35,11 @@ describe('describeRule', () => {
     const d = def({ start: { op: '>', value: 8, holdS: 0 }, end: undefined })
     expect(describeRule(d)).toBe('Apower (2min avg) > 8')
   })
+
+  it('mentions the delivery window when set', () => {
+    const allowed = { ...def({}), notifyWindow: { mode: 'allow' as const, fromH: 8, toH: 22 } }
+    expect(describeRule(allowed)).toContain('· notifies 08:00–22:00')
+    const muted = { ...def({}), notifyWindow: { mode: 'block' as const, fromH: 22, toH: 7 } }
+    expect(describeRule(muted)).toContain('· muted 22:00–07:00')
+  })
 })

@@ -1,7 +1,7 @@
 'use client'
 
 import { useTheme } from 'next-themes'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   LineChart,
   Line,
@@ -13,7 +13,7 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import type { MetricReading, SensorMeta, AppConfig } from '@/lib/types'
-import { convertTemperature, metricLabel } from '@/lib/units'
+import { convertTemperature, metricDisplayInfo, metricLabel } from '@/lib/units'
 
 export interface TimeSelection {
   from: number // epoch ms
@@ -45,13 +45,9 @@ function buildSeries(readings: MetricReading[], meta: SensorMeta, config: AppCon
 
   const series: Series[] = []
   for (const [metric, rows] of byMetric) {
-    const field = meta.pull?.fields.find((f) => f.metric === metric)
     // Temperatures are stored canonically in °C (push and recognized pull
     // fields alike) and converted to the configured display unit here
-    const isTemp =
-      (meta.type === 'push' && metric === 'temperature') || field?.unitKind === 'temperature'
-    const isPushHumidity = meta.type === 'push' && metric === 'humidity'
-    const unit = isTemp ? `°${config.temperatureUnit}` : isPushHumidity ? '%' : (field?.unit ?? '')
+    const { isTemp, unit } = metricDisplayInfo(meta, config, metric)
     series.push({
       metric,
       title: unit ? `${metricLabel(metric)} (${unit})` : metricLabel(metric),
@@ -95,8 +91,12 @@ const LINE_COLORS = {
 export function SensorChart({ readings, meta, config, selection, onSelectionChange }: Props) {
   const { resolvedTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
-  // In-progress click-drag on any of the metric charts (they share a time axis)
+  // In-progress click-drag on any of the metric charts (they share a time
+  // axis). The pressed-but-not-yet-moved position lives in a ref so a plain
+  // tap never triggers a state update — rerendering on tap dismisses the
+  // tooltip, which makes inspecting data points on touch screens impossible.
   const [drag, setDrag] = useState<{ start: number; end: number } | null>(null)
+  const pressedTs = useRef<number | null>(null)
   useEffect(() => setMounted(true), [])
 
   if (!mounted) return <div className="h-64 rounded-lg bg-muted animate-pulse" />
@@ -131,26 +131,36 @@ export function SensorChart({ readings, meta, config, selection, onSelectionChan
 
   const handleMouseDown = (e: unknown) => {
     if (!selectable) return
-    const ts = activeTs(e)
-    if (ts !== null) setDrag({ start: ts, end: ts })
+    pressedTs.current = activeTs(e)
   }
 
   const handleMouseMove = (e: unknown) => {
-    if (!drag) return
+    const start = pressedTs.current
+    if (start === null) return
     const ts = activeTs(e)
-    if (ts !== null && ts !== drag.end) setDrag({ start: drag.start, end: ts })
+    if (ts === null) return
+    // Drag state (and its rerender) starts only once the pointer actually moves
+    if (!drag) {
+      if (ts !== start) setDrag({ start, end: ts })
+    } else if (ts !== drag.end) {
+      setDrag({ start: drag.start, end: ts })
+    }
   }
 
   const handleMouseUp = () => {
-    if (!drag) return
-    // A click without dragging clears any existing selection
-    if (drag.start === drag.end) onSelectionChange?.(null)
-    else
+    const pressed = pressedTs.current
+    pressedTs.current = null
+    if (pressed === null) return
+    if (drag) {
       onSelectionChange?.({
         from: Math.min(drag.start, drag.end),
         to: Math.max(drag.start, drag.end),
       })
-    setDrag(null)
+      setDrag(null)
+    } else if (selection) {
+      // A click without dragging clears any existing selection
+      onSelectionChange?.(null)
+    }
   }
 
   // The pending drag takes visual precedence over a committed selection

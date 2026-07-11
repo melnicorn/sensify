@@ -14,16 +14,18 @@ import {
   type PatternId,
   type Sensitivity,
 } from '@/lib/alerts/patterns'
-import type { RuleDefinition, Agg, Op } from '@/lib/alerts/schemas'
+import type { RuleDefinition, Agg, Op, NotifyWindow } from '@/lib/alerts/schemas'
+import { hourLabel } from '@/lib/alerts/notify-window'
 import type { SignalPoint } from '@/lib/alerts/machine'
 import { createRuleAction } from '@/app/alerts-actions'
 import type { Channel } from '@/lib/alerts/repo'
 import type { MetricReading, SensorMeta, AppConfig } from '@/lib/types'
 import type { TimeSelection } from './sensor-chart'
-import { convertTemperature, metricLabel } from '@/lib/units'
+import { convertTemperature, metricDisplayInfo, metricLabel } from '@/lib/units'
 
 const BACKTEST_RANGE = '7d'
 const BACKTEST_MS = 7 * 24 * 3_600_000
+const HOURS = Array.from({ length: 24 }, (_, h) => h)
 
 interface Params {
   agg: Agg
@@ -114,15 +116,15 @@ export function AlertWizard({ meta, config, channels, readings, selection, open,
   const [onStart, setOnStart] = useState('')
   const [onEnd, setOnEnd] = useState('')
   const [selectedChannels, setSelectedChannels] = useState<string[]>([])
+  const [windowMode, setWindowMode] = useState<'always' | NotifyWindow['mode']>('always')
+  const [windowFromH, setWindowFromH] = useState(22)
+  const [windowToH, setWindowToH] = useState(7)
   const [history, setHistory] = useState<SignalPoint[] | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
   // Temperatures are stored °C; the wizard edits values in the display unit
-  const field = meta.pull?.fields.find((f) => f.metric === metric)
-  const isTemp =
-    (meta.type === 'push' && metric === 'temperature') || field?.unitKind === 'temperature'
-  const unitLabel = isTemp ? `°${config.temperatureUnit}` : (field?.unit ?? '')
+  const { isTemp, unit: unitLabel } = metricDisplayInfo(meta, config, metric)
   const toDisplay = (v: number) =>
     parseFloat((isTemp ? convertTemperature(v, 'C', config.temperatureUnit) : v).toFixed(2))
   const fromDisplay = (v: number) => (isTemp ? convertTemperature(v, config.temperatureUnit, 'C') : v)
@@ -256,8 +258,11 @@ export function AlertWizard({ meta, config, channels, readings, selection, open,
         ...(notifyStart ? (onStart.trim() ? { onStart: onStart.trim() } : {}) : { onStart: null }),
         ...(notifyEnd ? (onEnd.trim() ? { onEnd: onEnd.trim() } : {}) : { onEnd: null }),
       },
+      ...(windowMode !== 'always'
+        ? { notifyWindow: { mode: windowMode, fromH: windowFromH, toH: windowToH } }
+        : {}),
     }
-  }, [params, metric, onStart, onEnd, notifyStart, notifyEnd])
+  }, [params, metric, onStart, onEnd, notifyStart, notifyEnd, windowMode, windowFromH, windowToH])
 
   const backtest = useMemo<BacktestEvent[] | null>(() => {
     if (!definition || history === null) return null
@@ -285,7 +290,9 @@ export function AlertWizard({ meta, config, channels, readings, selection, open,
     <Modal isOpen={open} onOpenChange={(v) => !v && onClose()}>
       <Modal.Backdrop>
         <Modal.Container size="lg">
-          <Modal.Dialog>
+          {/* max-h-full lets the dialog shrink to the viewport so the body's
+              built-in scroll-inside behavior engages on small screens */}
+          <Modal.Dialog className="max-h-full">
             <Modal.Header>
               <Modal.Heading>{selection ? 'New alert from selection' : 'New alert'}</Modal.Heading>
             </Modal.Header>
@@ -575,6 +582,57 @@ export function AlertWizard({ meta, config, channels, readings, selection, open,
                       </label>
                     ))}
                   </div>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-foreground">Delivery hours</label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={windowMode}
+                    onChange={(e) => setWindowMode(e.target.value as typeof windowMode)}
+                    className={selectClass}
+                  >
+                    <option value="always">Send any time</option>
+                    <option value="allow">Send only between</option>
+                    <option value="block">Don&apos;t send between</option>
+                  </select>
+                  {windowMode !== 'always' && (
+                    <>
+                      <select
+                        value={windowFromH}
+                        onChange={(e) => setWindowFromH(parseInt(e.target.value, 10))}
+                        className={selectClass}
+                        aria-label="From hour"
+                      >
+                        {HOURS.map((h) => (
+                          <option key={h} value={h}>
+                            {hourLabel(h)}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="text-sm text-muted-foreground">and</span>
+                      <select
+                        value={windowToH}
+                        onChange={(e) => setWindowToH(parseInt(e.target.value, 10))}
+                        className={selectClass}
+                        aria-label="To hour"
+                      >
+                        {HOURS.map((h) => (
+                          <option key={h} value={h}>
+                            {hourLabel(h)}
+                          </option>
+                        ))}
+                      </select>
+                    </>
+                  )}
+                </div>
+                {windowMode !== 'always' && (
+                  <p className="text-xs text-muted-foreground">
+                    Server time{windowToH <= windowFromH ? ', spanning midnight' : ''}. Events are
+                    still detected and logged outside these hours — only notifications are held
+                    back.
+                  </p>
                 )}
               </div>
             </Modal.Body>

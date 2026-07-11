@@ -20,6 +20,7 @@ import {
   type AlertRule,
 } from './repo'
 import { sendToChannel } from './channels'
+import { shouldNotifyAt } from './notify-window'
 import {
   computeSignal,
   stepMachine,
@@ -242,6 +243,12 @@ async function notifyTransition(
 ): Promise<void> {
   const configured = transition.type === 'start' ? def.notify.onStart : def.notify.onEnd
   if (configured === null) return // explicitly disabled for this transition
+  if (!shouldNotifyAt(def.notifyWindow, new Date())) {
+    // Outside the rule's delivery hours: the event is still recorded above,
+    // only the outbound message is dropped (not queued for later).
+    console.log(`[alert:${transition.type}] ${rule.name}: suppressed by delivery hours`)
+    return
+  }
 
   const sensor = getDb().prepare('SELECT name FROM sensors WHERE id = ?').get(rule.sensorId) as
     | { name: string }
