@@ -366,6 +366,30 @@ export async function listEventsForRule(ruleId: string, limit = 50): Promise<Ale
   return rows.map(rowToEvent)
 }
 
+export interface SensorAlertEvent extends AlertEvent {
+  ruleName: string
+  metric: string | null // null when the stored definition fails validation
+}
+
+/** Event history across all of one sensor's rules, newest first. */
+export async function listEventsForSensor(
+  sensorId: string,
+  limit = 20
+): Promise<SensorAlertEvent[]> {
+  const rows = getDb()
+    .prepare(
+      `SELECT e.*, r.name AS rule_name, r.definition FROM alert_events e
+       JOIN alert_rules r ON r.id = e.rule_id
+       WHERE r.sensor_id = ? ORDER BY e.started_at DESC LIMIT ?`
+    )
+    .all(sensorId, limit) as (EventRow & { rule_name: string; definition: string })[]
+  return rows.map((row) => ({
+    ...rowToEvent(row),
+    ruleName: row.rule_name,
+    metric: parseDefinition(row.definition).def?.trigger.metric ?? null,
+  }))
+}
+
 export async function listRecentEvents(limit = 100): Promise<AlertEvent[]> {
   const rows = getDb()
     .prepare('SELECT * FROM alert_events ORDER BY started_at DESC LIMIT ?')

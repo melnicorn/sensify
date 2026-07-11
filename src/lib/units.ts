@@ -1,3 +1,5 @@
+import type { SensorMeta, AppConfig } from './types'
+
 // ---------- unit registry ----------
 // Pull-device field units arrive as free text ("degC", "°F", "Wh"). Labels
 // that resolve to a known dimension get canonical treatment: temperature
@@ -79,4 +81,23 @@ export function formatMetricValue(value: number, unit?: string): string {
 export function metricLabel(metric: string): string {
   const words = metric.replace(/[_.-]+/g, ' ').trim()
   return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
+/** Display treatment for one metric of a sensor: whether its stored values
+ *  are canonical °C (push temperature and recognized pull temperature fields)
+ *  and the unit label to show next to values. */
+export function metricDisplayInfo(
+  meta: SensorMeta,
+  config: AppConfig,
+  metric: string
+): { isTemp: boolean; unit: string } {
+  const field = meta.pull?.fields.find((f) => f.metric === metric)
+  const isTemp =
+    (meta.type === 'push' && metric === 'temperature') || field?.unitKind === 'temperature'
+  const unit = isTemp
+    ? `°${config.temperatureUnit}`
+    : meta.type === 'push' && metric === 'humidity'
+      ? '%'
+      : (field?.unit ?? '')
+  return { isTemp, unit }
 }

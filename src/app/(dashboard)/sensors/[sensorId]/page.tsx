@@ -1,22 +1,43 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Wifi, Download, Upload } from 'lucide-react'
-import { getSensorMeta, getReadings, getConfig } from '@/lib/storage'
-import { listChannels, listRulesForSensor } from '@/lib/alerts/repo'
+import { getSensorMeta, getReadings, getLatestMetrics, getConfig } from '@/lib/storage'
+import { listChannels, listRulesForSensor, listEventsForSensor } from '@/lib/alerts/repo'
 import { buildRuleViews } from '@/lib/alerts/views'
 import { AlertRulesList } from '@/components/alert-rules-list'
+import { LatestReadings } from '@/components/latest-readings'
 import { SensorChartLive } from '@/components/sensor-chart-live'
 import { DeleteSensorButton } from '@/components/delete-sensor-button'
 import { SensorMetaPanel } from '@/components/sensor-meta-panel'
 import { SensorIntervalForm } from '@/components/sensor-interval-form'
 import { PullStatusPanel } from '@/components/pull-status-panel'
 import { updateSensorMetaAction, updateDesiredIntervalAction } from '@/app/actions'
+import { convertTemperature, formatMetricValue, metricDisplayInfo } from '@/lib/units'
+import type { SensorMeta, AppConfig } from '@/lib/types'
 
 const RANGES: Record<string, { label: string; hours: number }> = {
   '1h': { label: '1 hour', hours: 1 },
   '24h': { label: '24 hours', hours: 24 },
   '7d': { label: '7 days', hours: 24 * 7 },
   '30d': { label: '30 days', hours: 24 * 30 },
+}
+
+function fmtEventDuration(fromIso: string, toIso: string): string {
+  const mins = Math.round((Date.parse(toIso) - Date.parse(fromIso)) / 60_000)
+  if (mins < 60) return `${mins}m`
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`
+}
+
+function fmtEventValue(
+  meta: SensorMeta,
+  config: AppConfig,
+  metric: string | null,
+  value: number
+): string {
+  if (!metric) return formatMetricValue(value)
+  const { isTemp, unit } = metricDisplayInfo(meta, config, metric)
+  const display = isTemp ? convertTemperature(value, 'C', config.temperatureUnit) : value
+  return formatMetricValue(parseFloat(display.toFixed(1)), unit)
 }
 
 export default async function SensorDetailPage({
@@ -30,11 +51,13 @@ export default async function SensorDetailPage({
   const { range: rawRange } = await searchParams
   const range = rawRange && rawRange in RANGES ? rawRange : '7d'
 
-  const [meta, config, channels, sensorRules] = await Promise.all([
+  const [meta, config, channels, sensorRules, latest, events] = await Promise.all([
     getSensorMeta(sensorId),
     getConfig(),
     listChannels(),
     listRulesForSensor(sensorId),
+    getLatestMetrics(sensorId),
+    listEventsForSensor(sensorId, 20),
   ])
   if (!meta) notFound()
   const ruleViews = await buildRuleViews(sensorRules)
@@ -89,6 +112,9 @@ export default async function SensorDetailPage({
         </div>
       </div>
 
+      {/* Last read values, refreshed at the device's cadence */}
+      <LatestReadings meta={meta} config={config} initial={latest} />
+
       {/* Metadata + device config side by side */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <SensorMetaPanel meta={meta} editAction={metaAction} />
@@ -104,6 +130,49 @@ export default async function SensorDetailPage({
         <div className="rounded-lg border border-border bg-card p-4">
           <h2 className="text-sm font-semibold text-foreground mb-1">Alerts</h2>
           <AlertRulesList rules={ruleViews} />
+        </div>
+      )}
+
+      {/* Alert event history for this sensor */}
+      {(ruleViews.length > 0 || events.length > 0) && (
+        <div className="rounded-lg border border-border bg-card p-4">
+          <h2 className="text-sm font-semibold text-foreground mb-2">Alert history</h2>
+          {events.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No alert events recorded yet.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-muted-foreground border-b border-border">
+                    <th className="pb-2 pr-4 font-medium">Rule</th>
+                    <th className="pb-2 pr-4 font-medium">Started</th>
+                    <th className="pb-2 pr-4 font-medium">Duration</th>
+                    <th className="pb-2 font-medium">Peak</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {events.map((e) => (
+                    <tr key={e.id} className="text-foreground">
+                      <td className="py-2 pr-4">{e.ruleName}</td>
+                      <td className="py-2 pr-4 tabular-nums whitespace-nowrap">
+                        {new Date(e.startedAt).toLocaleString()}
+                      </td>
+                      <td className="py-2 pr-4 tabular-nums whitespace-nowrap">
+                        {e.endedAt ? (
+                          fmtEventDuration(e.startedAt, e.endedAt)
+                        ) : (
+                          <span className="text-green-600 dark:text-green-400">ongoing</span>
+                        )}
+                      </td>
+                      <td className="py-2 tabular-nums whitespace-nowrap">
+                        {e.stats ? fmtEventValue(meta, config, e.metric, e.stats.max) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

@@ -37,6 +37,17 @@ export type LevelTrigger = z.infer<typeof LevelTriggerSchema>
 export const TriggerSchema = z.discriminatedUnion('kind', [LevelTriggerSchema])
 export type Trigger = z.infer<typeof TriggerSchema>
 
+// Delivery window: restricts when notifications are sent — events are still
+// detected and logged regardless. Hours are 0–23 in the server's local time;
+// the span [fromH, toH) wraps past midnight when toH <= fromH (e.g. 22 → 7).
+// mode 'allow' = send only inside the span, 'block' = mute inside the span.
+export const NotifyWindowSchema = z.object({
+  mode: z.enum(['allow', 'block']),
+  fromH: z.number().int().min(0).max(23),
+  toH: z.number().int().min(0).max(23),
+})
+export type NotifyWindow = z.infer<typeof NotifyWindowSchema>
+
 export const RuleDefinitionSchema = z.object({
   v: z.literal(1),
   trigger: TriggerSchema,
@@ -49,6 +60,8 @@ export const RuleDefinitionSchema = z.object({
       onEnd: z.string().max(500).nullable().optional(),
     })
     .default({}),
+  // Absent = deliver notifications at any hour
+  notifyWindow: NotifyWindowSchema.optional(),
 })
 export type RuleDefinition = z.infer<typeof RuleDefinitionSchema>
 
