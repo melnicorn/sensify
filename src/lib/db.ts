@@ -85,6 +85,56 @@ WHERE EXISTS (
     AND lower(replace(replace(trim(pf.unit), '°', ''), ' ', '')) IN ('k', 'degk', 'kelvin')
 );
 `,
+  // 3: alerting. Rule definitions are versioned JSON (see src/lib/alerts);
+  // runtime state lives in alert_rule_state and is written only on phase
+  // transitions. alert_events is the per-event history log.
+  `
+CREATE TABLE channels (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,
+  config TEXT NOT NULL,
+  last_ok_at TEXT,
+  last_error TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE alert_rules (
+  id TEXT PRIMARY KEY,
+  sensor_id TEXT NOT NULL REFERENCES sensors(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  definition TEXT NOT NULL,
+  last_error TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_alert_rules_sensor ON alert_rules (sensor_id);
+
+CREATE TABLE alert_rule_channels (
+  rule_id TEXT NOT NULL REFERENCES alert_rules(id) ON DELETE CASCADE,
+  channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  PRIMARY KEY (rule_id, channel_id)
+);
+
+CREATE TABLE alert_rule_state (
+  rule_id TEXT PRIMARY KEY REFERENCES alert_rules(id) ON DELETE CASCADE,
+  phase TEXT NOT NULL DEFAULT 'idle',
+  phase_since TEXT NOT NULL,
+  event_id TEXT,
+  rule_updated_at TEXT,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE alert_events (
+  id TEXT PRIMARY KEY,
+  rule_id TEXT NOT NULL REFERENCES alert_rules(id) ON DELETE CASCADE,
+  started_at TEXT NOT NULL,
+  ended_at TEXT,
+  stats TEXT
+);
+CREATE INDEX idx_alert_events_rule ON alert_events (rule_id, started_at);
+`,
 ]
 
 function migrate(database: Database.Database): void {
