@@ -59,6 +59,32 @@ CREATE TABLE IF NOT EXISTS config (
   value TEXT NOT NULL
 );
 `,
+  // 2: unit normalization. pull_fields.unit_kind marks fields whose unit label
+  // resolves to a known dimension; temperature readings become canonical °C.
+  // The label-normalization SQL mirrors parseUnitLabel() in units.ts.
+  `
+ALTER TABLE pull_fields ADD COLUMN unit_kind TEXT;
+
+UPDATE pull_fields SET unit_kind = 'temperature'
+WHERE lower(replace(replace(replace(replace(trim(unit), '°', ''), 'degrees', 'deg'), 'degree', 'deg'), ' ', ''))
+  IN ('c', 'f', 'k', 'degc', 'degf', 'degk', 'celsius', 'fahrenheit', 'kelvin');
+
+UPDATE readings SET value = (value - 32.0) * 5.0 / 9.0
+WHERE EXISTS (
+  SELECT 1 FROM pull_fields pf
+  WHERE pf.sensor_id = readings.sensor_id AND pf.metric = readings.metric
+    AND pf.unit_kind = 'temperature'
+    AND lower(replace(replace(trim(pf.unit), '°', ''), ' ', '')) IN ('f', 'degf', 'fahrenheit')
+);
+
+UPDATE readings SET value = value - 273.15
+WHERE EXISTS (
+  SELECT 1 FROM pull_fields pf
+  WHERE pf.sensor_id = readings.sensor_id AND pf.metric = readings.metric
+    AND pf.unit_kind = 'temperature'
+    AND lower(replace(replace(trim(pf.unit), '°', ''), ' ', '')) IN ('k', 'degk', 'kelvin')
+);
+`,
 ]
 
 function migrate(database: Database.Database): void {

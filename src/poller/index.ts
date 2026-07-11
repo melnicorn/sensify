@@ -6,6 +6,7 @@ import {
   recordPollFailure,
 } from '../lib/repo'
 import { getAtPath, isCapturable, toMetricValue } from '../lib/json-path'
+import { toCanonicalValue } from '../lib/units'
 import type { SensorMeta } from '../lib/types'
 
 const CONFIG_RELOAD_MS = 15_000
@@ -74,7 +75,8 @@ async function pollDevice(device: ScheduledDevice) {
     for (const field of pull.fields) {
       const raw = getAtPath(body, field.path)
       if (isCapturable(raw)) {
-        metrics.push({ metric: field.metric, value: toMetricValue(raw) })
+        // Canonical storage units: temperature fields are converted to °C
+        metrics.push({ metric: field.metric, value: toCanonicalValue(toMetricValue(raw), field.unit) })
       } else {
         missing.push(field.path)
       }

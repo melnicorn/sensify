@@ -6,6 +6,9 @@ export interface PullField {
   path: string // dot/bracket path into the device JSON, e.g. "aenergy.total" or "[0].apower"
   metric: string // unique-per-sensor metric name, e.g. "energy_total"
   unit?: string // optional display label, e.g. "W", "Wh"
+  // Set (server-side, from the unit label) when the label resolves to a known
+  // dimension. Temperature fields store canonical °C and convert for display.
+  unitKind?: 'temperature' | null
 }
 
 export interface PullConfig {

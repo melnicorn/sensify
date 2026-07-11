@@ -9,15 +9,18 @@ const RANGE_HOURS: Record<string, number> = {
   '30d': 24 * 30,
 }
 
-// Values are exported as stored: temperature in °C, humidity in %, pull
-// metrics in whatever unit their field mapping declares.
+// Values are exported as stored: temperatures in °C (push always, pull fields
+// with a recognized temperature label), humidity in %, other pull metrics in
+// whatever unit their field mapping declares.
 function unitFor(meta: SensorMeta, metric: string): string | null {
   if (meta.type === 'push') {
     if (metric === 'temperature') return 'C'
     if (metric === 'humidity') return '%'
     return null
   }
-  return meta.pull?.fields.find((f) => f.metric === metric)?.unit ?? null
+  const field = meta.pull?.fields.find((f) => f.metric === metric)
+  if (!field) return null
+  return field.unitKind === 'temperature' ? 'C' : (field.unit ?? null)
 }
 
 export async function GET(

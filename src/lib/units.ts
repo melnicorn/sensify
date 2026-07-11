@@ -1,3 +1,48 @@
+// ---------- unit registry ----------
+// Pull-device field units arrive as free text ("degC", "°F", "Wh"). Labels
+// that resolve to a known dimension get canonical treatment: temperature
+// readings are stored in °C and converted to the display preference, exactly
+// like push sensors. Unrecognized labels remain display-only text.
+
+const TEMPERATURE_ALIASES: Record<string, 'C' | 'F' | 'K'> = {
+  c: 'C',
+  degc: 'C',
+  celsius: 'C',
+  f: 'F',
+  degf: 'F',
+  fahrenheit: 'F',
+  k: 'K',
+  degk: 'K',
+  kelvin: 'K',
+}
+
+export interface ParsedUnit {
+  kind: 'temperature'
+  unit: 'C' | 'F' | 'K'
+}
+
+/** Resolve a free-text unit label to a known dimension, or null if it is
+ *  just a display label (W, Wh, %, lux, …). */
+export function parseUnitLabel(label?: string | null): ParsedUnit | null {
+  if (!label) return null
+  const norm = label
+    .trim()
+    .toLowerCase()
+    .replace(/°/g, '')
+    .replace(/degrees?/g, 'deg')
+    .replace(/\s+/g, '')
+  const temp = TEMPERATURE_ALIASES[norm]
+  return temp ? { kind: 'temperature', unit: temp } : null
+}
+
+/** Convert a raw device value to canonical storage units based on its field's
+ *  unit label: temperatures become °C, everything else passes through. */
+export function toCanonicalValue(value: number, unitLabel?: string | null): number {
+  const parsed = parseUnitLabel(unitLabel)
+  if (parsed?.kind === 'temperature') return convertTemperature(value, parsed.unit, 'C')
+  return value
+}
+
 export function convertTemperature(value: number, from: 'C' | 'F' | 'K', to: 'C' | 'F' | 'K'): number {
   if (from === to) return value
   // Convert to Celsius first

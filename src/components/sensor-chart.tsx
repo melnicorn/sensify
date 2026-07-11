@@ -45,13 +45,13 @@ function buildSeries(readings: MetricReading[], meta: SensorMeta, config: AppCon
 
   const series: Series[] = []
   for (const [metric, rows] of byMetric) {
-    const isPushTemp = meta.type === 'push' && metric === 'temperature'
+    const field = meta.pull?.fields.find((f) => f.metric === metric)
+    // Temperatures are stored canonically in °C (push and recognized pull
+    // fields alike) and converted to the configured display unit here
+    const isTemp =
+      (meta.type === 'push' && metric === 'temperature') || field?.unitKind === 'temperature'
     const isPushHumidity = meta.type === 'push' && metric === 'humidity'
-    const unit = isPushTemp
-      ? `°${config.temperatureUnit}`
-      : isPushHumidity
-        ? '%'
-        : (meta.pull?.fields.find((f) => f.metric === metric)?.unit ?? '')
+    const unit = isTemp ? `°${config.temperatureUnit}` : isPushHumidity ? '%' : (field?.unit ?? '')
     series.push({
       metric,
       title: unit ? `${metricLabel(metric)} (${unit})` : metricLabel(metric),
@@ -59,10 +59,7 @@ function buildSeries(readings: MetricReading[], meta: SensorMeta, config: AppCon
       points: rows.map((r) => ({
         ts: Date.parse(r.ts),
         value: parseFloat(
-          (isPushTemp
-            ? convertTemperature(r.value, 'C', config.temperatureUnit)
-            : r.value
-          ).toFixed(2)
+          (isTemp ? convertTemperature(r.value, 'C', config.temperatureUnit) : r.value).toFixed(2)
         ),
       })),
     })
