@@ -1,5 +1,6 @@
 import { getDb } from './db'
-import { convertTemperature } from './units'
+import { convertTemperature, parseUnitLabel } from './units'
+import { evaluateReading } from './alerts/engine'
 import type {
   SensorMeta,
   PullField,
@@ -68,9 +69,21 @@ function rowToMeta(row: SensorRow, fields: PullField[]): SensorMeta {
 
 function getFields(sensorId: string): PullField[] {
   const rows = getDb()
-    .prepare('SELECT path, metric, unit FROM pull_fields WHERE sensor_id = ? ORDER BY metric')
-    .all(sensorId) as { path: string; metric: string; unit: string | null }[]
-  return rows.map((r) => ({ path: r.path, metric: r.metric, unit: r.unit ?? undefined }))
+    .prepare(
+      'SELECT path, metric, unit, unit_kind FROM pull_fields WHERE sensor_id = ? ORDER BY metric'
+    )
+    .all(sensorId) as {
+    path: string
+    metric: string
+    unit: string | null
+    unit_kind: string | null
+  }[]
+  return rows.map((r) => ({
+    path: r.path,
+    metric: r.metric,
+    unit: r.unit ?? undefined,
+    unitKind: r.unit_kind === 'temperature' ? 'temperature' : null,
+  }))
 }
 
 // ---------- sensors ----------
@@ -208,6 +221,9 @@ export async function saveReading(
   })
   tx()
 
+  // Alert evaluation shares one code path with pull ingest (never throws)
+  for (const m of metrics) evaluateReading(input.sensorId, m.metric, m.value, now)
+
   return {
     id: crypto.randomUUID(),
     timestamp: now,
@@ -233,9 +249,10 @@ export async function createPullSensor(input: {
        VALUES (?, 'pull', ?, ?, ?, ?, ?, 1, ?)`
     ).run(id, input.name, now, now, input.url, input.pollInterval, input.lastSample ?? null)
     const insert = db.prepare(
-      'INSERT INTO pull_fields (sensor_id, path, metric, unit) VALUES (?, ?, ?, ?)'
+      'INSERT INTO pull_fields (sensor_id, path, metric, unit, unit_kind) VALUES (?, ?, ?, ?, ?)'
     )
-    for (const f of input.fields) insert.run(id, f.path, f.metric, f.unit ?? null)
+    for (const f of input.fields)
+      insert.run(id, f.path, f.metric, f.unit ?? null, parseUnitLabel(f.unit)?.kind ?? null)
   })
   tx()
   return id
@@ -263,9 +280,10 @@ export async function updatePullSensor(
     if (result.changes === 0) throw new Error(`Pull sensor ${sensorId} not found`)
     db.prepare('DELETE FROM pull_fields WHERE sensor_id = ?').run(sensorId)
     const insert = db.prepare(
-      'INSERT INTO pull_fields (sensor_id, path, metric, unit) VALUES (?, ?, ?, ?)'
+      'INSERT INTO pull_fields (sensor_id, path, metric, unit, unit_kind) VALUES (?, ?, ?, ?, ?)'
     )
-    for (const f of input.fields) insert.run(sensorId, f.path, f.metric, f.unit ?? null)
+    for (const f of input.fields)
+      insert.run(sensorId, f.path, f.metric, f.unit ?? null, parseUnitLabel(f.unit)?.kind ?? null)
   })
   tx()
 }
@@ -304,6 +322,10 @@ export async function recordPollSuccess(
     ).run(now, now, sample, softError, sensorId)
   })
   tx()
+
+  // Alert evaluation shares one code path with push ingest (never throws)
+  for (const m of metrics) evaluateReading(sensorId, m.metric, m.value, now)
+
   return now
 }
 

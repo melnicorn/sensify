@@ -20,10 +20,14 @@ function timeAgo(isoStr: string): string {
 }
 
 function MetricValue({ meta, m, config }: { meta: SensorMeta; m: LatestMetric; config: AppConfig }) {
-  // Push sensors store canonical metrics: temperature in °C, humidity in %
-  if (meta.type === 'push' && m.metric === 'temperature') {
+  const field = meta.pull?.fields.find((f) => f.metric === m.metric)
+  // Temperatures are stored canonically in °C — push sensors always, pull
+  // fields when their unit label was recognized as a temperature
+  const isTemp =
+    (meta.type === 'push' && m.metric === 'temperature') || field?.unitKind === 'temperature'
+  if (isTemp) {
     return (
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1.5" title={metricLabel(m.metric)}>
         <Thermometer size={16} className="text-primary" />
         <span className="text-lg font-medium tabular-nums">
           {formatTemperature(m.value, 'C', config.temperatureUnit)}
@@ -39,7 +43,7 @@ function MetricValue({ meta, m, config }: { meta: SensorMeta; m: LatestMetric; c
       </div>
     )
   }
-  const unit = meta.pull?.fields.find((f) => f.metric === m.metric)?.unit
+  const unit = field?.unit
   return (
     <div className="flex items-center gap-1.5" title={metricLabel(m.metric)}>
       <Gauge size={16} className="text-primary" />

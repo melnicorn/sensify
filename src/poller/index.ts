@@ -6,9 +6,12 @@ import {
   recordPollFailure,
 } from '../lib/repo'
 import { getAtPath, isCapturable, toMetricValue } from '../lib/json-path'
+import { toCanonicalValue } from '../lib/units'
+import { sweepOpenRules } from '../lib/alerts/engine'
 import type { SensorMeta } from '../lib/types'
 
 const CONFIG_RELOAD_MS = 15_000
+const ALERT_SWEEP_MS = 15_000
 const TICK_MS = 1_000
 const FETCH_TIMEOUT_MS = 5_000
 const MAX_BACKOFF_MS = 300_000 // 5 min cap when a device keeps failing
@@ -74,7 +77,8 @@ async function pollDevice(device: ScheduledDevice) {
     for (const field of pull.fields) {
       const raw = getAtPath(body, field.path)
       if (isCapturable(raw)) {
-        metrics.push({ metric: field.metric, value: toMetricValue(raw) })
+        // Canonical storage units: temperature fields are converted to °C
+        metrics.push({ metric: field.metric, value: toCanonicalValue(toMetricValue(raw), field.unit) })
       } else {
         missing.push(field.path)
       }
@@ -112,6 +116,9 @@ async function main() {
     reloadDevices().catch((err) => log(`config reload failed: ${err}`))
   }, CONFIG_RELOAD_MS)
 
+  // Advance alert dwell/cooldown timers between readings (see alerts/engine)
+  const alertTimer = setInterval(() => sweepOpenRules(), ALERT_SWEEP_MS)
+
   const tickTimer = setInterval(() => {
     if (stopping) return
     const now = Date.now()
@@ -128,6 +135,7 @@ async function main() {
     log(`received ${signal}, shutting down`)
     stopping = true
     clearInterval(configTimer)
+    clearInterval(alertTimer)
     clearInterval(tickTimer)
     // Give in-flight polls a moment to finish writing
     setTimeout(() => process.exit(0), 1000)

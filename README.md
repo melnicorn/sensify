@@ -16,7 +16,9 @@ Data is stored in SQLite on a single volume, charted live in the web UI, and kep
 - Per-sensor metadata (location, zone, floor, hardware, tags)
 - Remote config for push devices: set a reporting interval in the UI and it's delivered on the device's next POST
 - Polling status, error reporting, and automatic backoff for unreachable devices
-- Light/dark theme, temperature unit conversion (°C / °F / K)
+- Alerts: drag across a chart to select an example event, and Sensify fits a trigger for it — reviewed as an editable sentence, previewed with a 7-day backtest, delivered via Telegram
+- Export chart data as JSON (current view, a drag-selected time frame, or everything), for viewing or download
+- Light/dark theme, temperature unit conversion (°C / °F / K) — pull fields with a recognized temperature unit label (`degC`, `°F`, `kelvin`, …) are normalized and follow the display preference too
 
 ## Getting started (Docker)
 
@@ -81,6 +83,19 @@ If the UI has set a desired reporting interval for the device, the response incl
 ```json
 { "id": "…", "timestamp": "…", "config": { "interval": 120 } }
 ```
+
+## Alerts
+
+Sensify can watch any metric and message you when something starts and when it finishes — a washing machine cycle, a humidity threshold, a freezer warming up.
+
+1. In **Settings → Notification channels**, add a Telegram bot (token from [@BotFather](https://t.me/BotFather)) and the chat ID it should message, then hit **Test**.
+2. Open a sensor, drag across the chart to select one example of the event (include some quiet time around it), and click **Create alert**. No example yet? Hit **New alert** and pick a pattern (cycle, spike, dip, level shift) — thresholds are derived from the sensor's own history using robust statistics, with a sensitivity slider.
+3. Sensify fits a trigger from the selection — threshold, smoothing, and debounce — and shows it as an editable sentence like *"Start when average over 2 min is > 8 W holding for 60 s; end when it stays ≤ 8 W for 3 min."*
+4. The backtest strip replays the rule over the last 7 days so you can see exactly which events it would have caught before saving.
+
+Alerts are edge-triggered state machines: one message when the event starts, one when it ends (with duration and peak), no repeats while values hover around the threshold. Dwell times debounce noisy signals, and a re-arm delay prevents back-to-back firing. Rules can also be written from scratch for simple thresholds — pick the metric, comparison, and hold time in the same form.
+
+Message templates support `{sensor}`, `{metric}`, `{value}`, `{min}`, `{max}`, `{avg}`, `{duration}`, and `{started_at}`. Rules, state, and event history live on the **Alerts** page; each sensor's rules also appear on its detail page.
 
 ## Running from source
 
