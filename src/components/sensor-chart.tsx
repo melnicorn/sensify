@@ -91,6 +91,7 @@ const LINE_COLORS = {
 export function SensorChart({ readings, meta, config, selection, onSelectionChange }: Props) {
   const { resolvedTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
+  const [logScaleMetrics, setLogScaleMetrics] = useState<Record<string, boolean>>({})
   // In-progress click-drag on any of the metric charts (they share a time
   // axis). The pressed-but-not-yet-moved position lives in a ref so a plain
   // tap never triggers a state update — rerendering on tap dismisses the
@@ -176,73 +177,117 @@ export function SensorChart({ readings, meta, config, selection, onSelectionChan
 
   return (
     <div className="space-y-6">
-      {series.map((s, i) => (
-        <div key={s.metric} className={selectable ? 'select-none [&_svg]:cursor-crosshair' : ''}>
-          <h3 className="text-sm font-medium text-muted-foreground mb-2">{s.title}</h3>
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart
-              data={s.points}
-              margin={{ top: 4, right: 16, left: 0, bottom: 4 }}
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
-              onMouseLeave={handleMouseUp}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke={colors.grid} />
-              <XAxis
-                dataKey="ts"
-                type="number"
-                domain={['dataMin', 'dataMax']}
-                tickFormatter={formatTick}
-                {...commonAxis}
-                interval="preserveStartEnd"
-                minTickGap={40}
-              />
-              <YAxis
-                {...commonAxis}
-                width={60}
-                domain={[
-                  (min: number) => Math.floor(min * 0.98),
-                  (max: number) => Math.ceil(max * 1.02) || 1,
-                ]}
-              />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: colors.tooltip,
-                  border: `1px solid ${colors.tooltipBorder}`,
-                  borderRadius: '6px',
-                  fontSize: 12,
-                  color: isDark ? '#ecfeff' : '#0f172a',
-                }}
-                labelFormatter={(ts: number) => new Date(ts).toLocaleString()}
-                formatter={(v: number) => [
-                  s.unitLabel ? `${v} ${s.unitLabel}` : String(v),
-                  metricLabel(s.metric),
-                ]}
-              />
-              {highlight && (
-                <ReferenceArea
-                  x1={highlight.from}
-                  x2={highlight.to}
-                  ifOverflow="visible"
-                  fill={colors.selection}
-                  fillOpacity={0.12}
-                  stroke={colors.selection}
-                  strokeOpacity={0.4}
+      {series.map((s, i) => {
+        const hasNonPositive = s.points.some((p) => p.value <= 0)
+        const isLog = (logScaleMetrics[s.metric] || false) && !hasNonPositive
+
+        return (
+          <div key={s.metric} className={selectable ? 'select-none [&_svg]:cursor-crosshair' : ''}>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-medium text-muted-foreground">{s.title}</h3>
+              <div className="flex items-center gap-1 bg-muted p-0.5 rounded-lg text-xs border border-border/50">
+                <button
+                  onClick={() => setLogScaleMetrics((prev) => ({ ...prev, [s.metric]: false }))}
+                  className={`px-2 py-1 rounded-md transition-all duration-200 ${
+                    !isLog
+                      ? 'bg-card text-foreground shadow-sm font-medium'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Linear
+                </button>
+                <button
+                  disabled={hasNonPositive}
+                  onClick={() => setLogScaleMetrics((prev) => ({ ...prev, [s.metric]: true }))}
+                  className={`px-2 py-1 rounded-md transition-all duration-200 ${
+                    isLog
+                      ? 'bg-card text-foreground shadow-sm font-medium'
+                      : 'text-muted-foreground hover:text-foreground'
+                  } ${hasNonPositive ? 'opacity-40 cursor-not-allowed' : ''}`}
+                  title={hasNonPositive ? 'Log scale is only supported for strictly positive values' : undefined}
+                >
+                  Log
+                </button>
+              </div>
+            </div>
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart
+                data={s.points}
+                margin={{ top: 4, right: 16, left: 0, bottom: 4 }}
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={handleMouseUp}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke={colors.grid} />
+                <XAxis
+                  dataKey="ts"
+                  type="number"
+                  domain={['dataMin', 'dataMax']}
+                  tickFormatter={formatTick}
+                  {...commonAxis}
+                  interval="preserveStartEnd"
+                  minTickGap={40}
                 />
-              )}
-              <Line
-                type="monotone"
-                dataKey="value"
-                stroke={palette[i % palette.length]}
-                strokeWidth={2}
-                dot={false}
-                activeDot={{ r: 4 }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      ))}
+                <YAxis
+                  {...commonAxis}
+                  width={60}
+                  scale={isLog ? 'log' : 'auto'}
+                  domain={
+                    isLog
+                      ? [
+                          (min: number) => {
+                            const adjustedMin = min * 0.9
+                            return adjustedMin > 0 ? adjustedMin : 0.1
+                          },
+                          (max: number) => max * 1.1 || 1,
+                        ]
+                      : [
+                          (min: number) => Math.floor(min * 0.98),
+                          (max: number) => Math.ceil(max * 1.02) || 1,
+                        ]
+                  }
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: colors.tooltip,
+                    border: `1px solid ${colors.tooltipBorder}`,
+                    borderRadius: '6px',
+                    fontSize: 12,
+                    color: isDark ? '#ecfeff' : '#0f172a',
+                  }}
+                  labelFormatter={(ts: number) => new Date(ts).toLocaleString()}
+                  formatter={(v: number) => [
+                    s.unitLabel ? `${v} ${s.unitLabel}` : String(v),
+                    metricLabel(s.metric),
+                  ]}
+                />
+                {highlight && (
+                  <ReferenceArea
+                    x1={highlight.from}
+                    x2={highlight.to}
+                    ifOverflow="visible"
+                    fill={colors.selection}
+                    fillOpacity={0.12}
+                    stroke={colors.selection}
+                    strokeOpacity={0.4}
+                  />
+                )}
+                <Line
+                  type="monotone"
+                  dataKey="value"
+                  stroke={palette[i % palette.length]}
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                  animationDuration={300}
+                  animationEasing="ease-out"
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )
+      })}
     </div>
   )
 }
