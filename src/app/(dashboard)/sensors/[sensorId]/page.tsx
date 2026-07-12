@@ -4,7 +4,7 @@ import { ArrowLeft, Wifi, Download, Upload } from 'lucide-react'
 import { getSensorMeta, getReadings, getLatestMetrics, getConfig } from '@/lib/storage'
 import { listChannels, listRulesForSensor, listEventsForSensor } from '@/lib/alerts/repo'
 import { buildRuleViews } from '@/lib/alerts/views'
-import { AlertRulesList } from '@/components/alert-rules-list'
+import { SensorAlertsCard } from '@/components/sensor-alerts-card'
 import { LatestReadings } from '@/components/latest-readings'
 import { SensorChartLive } from '@/components/sensor-chart-live'
 import { DeleteSensorButton } from '@/components/delete-sensor-button'
@@ -120,12 +120,20 @@ export default async function SensorDetailPage({
       </div>
 
       {/* Alerts on this sensor */}
-      {ruleViews.length > 0 && (
-        <div className="rounded-lg border border-border bg-card p-4">
-          <h2 className="text-sm font-semibold text-foreground mb-1">Alerts</h2>
-          <AlertRulesList rules={ruleViews} />
-        </div>
-      )}
+      <SensorAlertsCard
+        meta={meta}
+        config={config}
+        channels={channels}
+        ruleViews={ruleViews}
+        editableRules={sensorRules
+          .filter((r) => r.definition !== null)
+          .map((r) => ({
+            id: r.id,
+            name: r.name,
+            definition: r.definition!,
+            channelIds: r.channelIds,
+          }))}
+      />
 
       {/* Alert event history for this sensor */}
       {(ruleViews.length > 0 || events.length > 0) && (
