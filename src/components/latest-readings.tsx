@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { Thermometer, Droplets, Gauge } from 'lucide-react'
 import { devicePeriodMs, formatPeriod } from '@/lib/device-period'
 import { convertTemperature, formatMetricValue, metricDisplayInfo, metricLabel } from '@/lib/units'
+import { getLatestMetricsAction } from '@/app/actions'
 import type { LatestMetric, SensorMeta, AppConfig } from '@/lib/types'
 
 const REFRESH_FLOOR_MS = 5_000
@@ -52,9 +53,7 @@ export function LatestReadings({ meta, config, initial }: Props) {
     setNowMs(Date.now())
     async function refresh() {
       try {
-        const res = await fetch(`/api/v1/sensors/${meta.id}/latest`)
-        if (!res.ok) return
-        setLatest((await res.json()) as LatestMetric[])
+        setLatest(await getLatestMetricsAction(meta.id))
       } catch {
         // keep showing last known values on network error
       } finally {

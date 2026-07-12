@@ -2,7 +2,7 @@
 
 import { useTransition } from 'react'
 import Link from 'next/link'
-import { Pause, Play, Trash2, AlertTriangle } from 'lucide-react'
+import { Pause, Pencil, Play, Trash2, AlertTriangle } from 'lucide-react'
 import { Button } from '@heroui/react'
 import { setRuleEnabledAction, deleteRuleAction } from '@/app/alerts-actions'
 import type { Phase } from '@/lib/alerts/schemas'
@@ -34,7 +34,15 @@ function fmtDuration(fromIso: string, toIso: string): string {
   return `${Math.floor(mins / 60)}h ${mins % 60}m`
 }
 
-function RuleRow({ rule, showSensor }: { rule: RuleView; showSensor: boolean }) {
+function RuleRow({
+  rule,
+  showSensor,
+  onEdit,
+}: {
+  rule: RuleView
+  showSensor: boolean
+  onEdit?: (ruleId: string) => void
+}) {
   const [isPending, startTransition] = useTransition()
 
   return (
@@ -74,6 +82,27 @@ function RuleRow({ rule, showSensor }: { rule: RuleView; showSensor: boolean }) 
         </p>
       </div>
       <div className="flex items-center gap-1 shrink-0">
+        {!rule.hasError &&
+          (onEdit ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              isDisabled={isPending}
+              onPress={() => onEdit(rule.id)}
+              aria-label="Edit alert"
+            >
+              <Pencil size={13} />
+            </Button>
+          ) : (
+            // Editing happens on the sensor page, where the wizard has context
+            <Link
+              href={`/sensors/${rule.sensorId}`}
+              aria-label="Edit alert on the sensor page"
+              className="p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            >
+              <Pencil size={13} />
+            </Link>
+          ))}
         <Button
           variant="ghost"
           size="sm"
@@ -98,7 +127,15 @@ function RuleRow({ rule, showSensor }: { rule: RuleView; showSensor: boolean }) 
   )
 }
 
-export function AlertRulesList({ rules, showSensor = false }: { rules: RuleView[]; showSensor?: boolean }) {
+export function AlertRulesList({
+  rules,
+  showSensor = false,
+  onEdit,
+}: {
+  rules: RuleView[]
+  showSensor?: boolean
+  onEdit?: (ruleId: string) => void
+}) {
   if (rules.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -109,7 +146,7 @@ export function AlertRulesList({ rules, showSensor = false }: { rules: RuleView[
   return (
     <div className="divide-y divide-border">
       {rules.map((r) => (
-        <RuleRow key={r.id} rule={r} showSensor={showSensor} />
+        <RuleRow key={r.id} rule={r} showSensor={showSensor} onEdit={onEdit} />
       ))}
     </div>
   )

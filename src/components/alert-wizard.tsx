@@ -17,7 +17,8 @@ import {
 import type { RuleDefinition, Agg, Op, NotifyWindow } from '@/lib/alerts/schemas'
 import { hourLabel } from '@/lib/alerts/notify-window'
 import type { SignalPoint } from '@/lib/alerts/machine'
-import { createRuleAction } from '@/app/alerts-actions'
+import { createRuleAction, updateRuleAction } from '@/app/alerts-actions'
+import { getReadingsAction } from '@/app/actions'
 import type { Channel } from '@/lib/alerts/repo'
 import type { MetricReading, SensorMeta, AppConfig } from '@/lib/types'
 import type { TimeSelection } from './sensor-chart'
@@ -39,12 +40,21 @@ interface Params {
   cooldownS: number
 }
 
+/** Existing rule loaded into the wizard for editing. */
+export interface EditableRule {
+  id: string
+  name: string
+  definition: RuleDefinition
+  channelIds: string[]
+}
+
 interface Props {
   meta: SensorMeta
   config: AppConfig
   channels: Channel[]
   readings: MetricReading[]
   selection: TimeSelection | null // null = manual creation, no fitting
+  editRule?: EditableRule // present = edit mode (no fitting, no gallery)
   open: boolean
   onClose: () => void
 }
@@ -83,10 +93,30 @@ function fmtDuration(ms: number): string {
   return `${Math.floor(mins / 60)}h ${mins % 60}m`
 }
 
-export function AlertWizard({ meta, config, channels, readings, selection, open, onClose }: Props) {
-  const metrics = useMemo(() => [...new Set(readings.map((r) => r.metric))].sort(), [readings])
+export function AlertWizard({
+  meta,
+  config,
+  channels,
+  readings,
+  selection,
+  editRule,
+  open,
+  onClose,
+}: Props) {
+  const metrics = useMemo(
+    () =>
+      [
+        ...new Set([
+          ...readings.map((r) => r.metric),
+          // The edited rule's metric stays selectable even without readings
+          ...(editRule ? [editRule.definition.trigger.metric] : []),
+        ]),
+      ].sort(),
+    [readings, editRule]
+  )
   // Default to the metric where the selection stands out most from baseline
   const [metric, setMetric] = useState(() => {
+    if (editRule) return editRule.definition.trigger.metric
     let best = metrics[0] ?? ''
     if (!selection) return best
     let bestScore = -Infinity
@@ -148,12 +178,45 @@ export function AlertWizard({ meta, config, channels, readings, selection, open,
       return
     }
     if (!metric) return
-    const key = selection
-      ? `sel:${metric}:${selection.from}:${selection.to}`
-      : `pat:${metric}:${pattern ?? 'none'}:${sensitivity}`
+    const key = editRule
+      ? `edit:${editRule.id}`
+      : selection
+        ? `sel:${metric}:${selection.from}:${selection.to}`
+        : `pat:${metric}:${pattern ?? 'none'}:${sensitivity}`
     if (seededKey.current === key) return
     seededKey.current = key
     setDerivedThreshold(null)
+
+    if (editRule) {
+      const def = editRule.definition
+      const end = def.trigger.end
+      setFitError(null)
+      setParams({
+        agg: def.trigger.signal.agg,
+        windowS: def.trigger.signal.windowS,
+        startOp: def.trigger.start.op,
+        startValue: def.trigger.start.value,
+        startHoldS: def.trigger.start.holdS,
+        endOp: end?.op ?? (def.trigger.start.op === '>' || def.trigger.start.op === '>=' ? '<=' : '>='),
+        endValue: end?.value ?? def.trigger.start.value,
+        endHoldS: end?.holdS ?? 0,
+        cooldownS: def.cooldownS,
+      })
+      setName(editRule.name)
+      setNotifyStart(def.notify.onStart !== null)
+      setNotifyEnd(def.notify.onEnd !== null)
+      setOnStart(typeof def.notify.onStart === 'string' ? def.notify.onStart : '')
+      setOnEnd(typeof def.notify.onEnd === 'string' ? def.notify.onEnd : '')
+      setSelectedChannels(editRule.channelIds)
+      if (def.notifyWindow) {
+        setWindowMode(def.notifyWindow.mode)
+        setWindowFromH(def.notifyWindow.fromH)
+        setWindowToH(def.notifyWindow.toH)
+      } else {
+        setWindowMode('always')
+      }
+      return
+    }
 
     if (selection) {
       const fit = fitLevelRule(points, { fromMs: selection.from, toMs: selection.to }, metric)
@@ -219,16 +282,15 @@ export function AlertWizard({ meta, config, channels, readings, selection, open,
     })
     setName(`${metricLabel(metric)} threshold`)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, metric, points, selection?.from, selection?.to, pattern, sensitivity])
+  }, [open, metric, points, selection?.from, selection?.to, pattern, sensitivity, editRule?.id])
 
   // 7-day history for the backtest strip, fetched once per metric
   useEffect(() => {
     if (!open) return
     let cancelled = false
     setHistory(null)
-    fetch(`/api/v1/sensors/${meta.id}/readings?range=${BACKTEST_RANGE}`)
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
-      .then((data: MetricReading[]) => {
+    getReadingsAction(meta.id, BACKTEST_RANGE)
+      .then((data) => {
         if (cancelled) return
         setHistory(
           data
@@ -273,12 +335,14 @@ export function AlertWizard({ meta, config, channels, readings, selection, open,
     if (!definition) return
     setSaveError(null)
     startTransition(async () => {
-      const result = await createRuleAction({
-        sensorId: meta.id,
-        name,
-        definition,
-        channelIds: selectedChannels,
-      })
+      const result = editRule
+        ? await updateRuleAction(editRule.id, { name, definition, channelIds: selectedChannels })
+        : await createRuleAction({
+            sensorId: meta.id,
+            name,
+            definition,
+            channelIds: selectedChannels,
+          })
       if (result.error) setSaveError(result.error)
       else onClose()
     })
@@ -294,7 +358,9 @@ export function AlertWizard({ meta, config, channels, readings, selection, open,
               built-in scroll-inside behavior engages on small screens */}
           <Modal.Dialog className="max-h-full">
             <Modal.Header>
-              <Modal.Heading>{selection ? 'New alert from selection' : 'New alert'}</Modal.Heading>
+              <Modal.Heading>
+                {editRule ? 'Edit alert' : selection ? 'New alert from selection' : 'New alert'}
+              </Modal.Heading>
             </Modal.Header>
             <Modal.Body className="space-y-4">
               <div className="flex items-center gap-2">
@@ -307,13 +373,15 @@ export function AlertWizard({ meta, config, channels, readings, selection, open,
                   ))}
                 </select>
                 <span className="text-xs text-muted-foreground">
-                  {selection
-                    ? `fitted from ${new Date(selection.from).toLocaleString()} – ${new Date(selection.to).toLocaleString()}`
-                    : 'tip: drag on the chart first and Sensify will fit these values for you'}
+                  {editRule
+                    ? 'saving restarts this alert from a clean state (an in-progress event is closed quietly)'
+                    : selection
+                      ? `fitted from ${new Date(selection.from).toLocaleString()} – ${new Date(selection.to).toLocaleString()}`
+                      : 'tip: drag on the chart first and Sensify will fit these values for you'}
                 </span>
               </div>
 
-              {!selection && (
+              {!selection && !editRule && (
                 <div className="space-y-2">
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
                     {PATTERNS.map((spec) => (
@@ -642,7 +710,7 @@ export function AlertWizard({ meta, config, channels, readings, selection, open,
                 Cancel
               </Button>
               <Button size="sm" onPress={save} isDisabled={isPending || !definition || !name.trim()}>
-                {isPending ? 'Saving…' : 'Save alert'}
+                {isPending ? 'Saving…' : editRule ? 'Save changes' : 'Save alert'}
               </Button>
             </Modal.Footer>
           </Modal.Dialog>

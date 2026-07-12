@@ -8,6 +8,7 @@ import {
   deleteChannel,
   getChannel,
   createRule,
+  updateRule,
   setRuleEnabled,
   deleteRule,
   getRule,
@@ -90,6 +91,32 @@ export async function createRuleAction(
     return { id }
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Failed to create alert' }
+  }
+}
+
+const UpdateRuleSchema = z.object({
+  name: z.string().trim().min(1, 'Name is required').max(128),
+  definition: RuleDefinitionSchema,
+  channelIds: z.array(z.string().uuid()).max(20),
+})
+
+export async function updateRuleAction(
+  ruleId: string,
+  input: unknown
+): Promise<{ id?: string; error?: string }> {
+  const result = UpdateRuleSchema.safeParse(input)
+  if (!result.success) {
+    return { error: result.error.issues[0]?.message ?? 'Invalid alert rule' }
+  }
+  try {
+    const rule = await getRule(ruleId)
+    if (!rule) return { error: 'Alert rule not found' }
+    await updateRule(ruleId, result.data)
+    revalidatePath(`/sensors/${rule.sensorId}`)
+    revalidatePath('/alerts')
+    return { id: ruleId }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Failed to update alert' }
   }
 }
 
