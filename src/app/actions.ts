@@ -11,8 +11,27 @@ import {
   createPullSensor,
   updatePullSensor,
   setPullEnabled,
+  getReadings,
+  getLatestMetrics,
 } from '@/lib/storage'
 import { PullDeviceInputSchema } from '@/lib/schemas'
+import { rangeHours } from '@/lib/chart-ranges'
+import type { MetricReading, LatestMetric } from '@/lib/types'
+
+// ---------- chart data (client refresh / range switching without navigation) ----------
+
+export async function getReadingsAction(
+  sensorId: string,
+  range: string
+): Promise<MetricReading[]> {
+  const now = new Date()
+  const from = new Date(now.getTime() - rangeHours(range) * 3_600_000)
+  return getReadings(sensorId, from.toISOString(), now.toISOString())
+}
+
+export async function getLatestMetricsAction(sensorId: string): Promise<LatestMetric[]> {
+  return getLatestMetrics(sensorId)
+}
 
 const ConfigSchema = z.object({
   temperatureUnit: z.enum(['C', 'F', 'K']),

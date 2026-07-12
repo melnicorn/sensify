@@ -18,6 +18,7 @@ import type { RuleDefinition, Agg, Op, NotifyWindow } from '@/lib/alerts/schemas
 import { hourLabel } from '@/lib/alerts/notify-window'
 import type { SignalPoint } from '@/lib/alerts/machine'
 import { createRuleAction } from '@/app/alerts-actions'
+import { getReadingsAction } from '@/app/actions'
 import type { Channel } from '@/lib/alerts/repo'
 import type { MetricReading, SensorMeta, AppConfig } from '@/lib/types'
 import type { TimeSelection } from './sensor-chart'
@@ -226,9 +227,8 @@ export function AlertWizard({ meta, config, channels, readings, selection, open,
     if (!open) return
     let cancelled = false
     setHistory(null)
-    fetch(`/api/v1/sensors/${meta.id}/readings?range=${BACKTEST_RANGE}`)
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
-      .then((data: MetricReading[]) => {
+    getReadingsAction(meta.id, BACKTEST_RANGE)
+      .then((data) => {
         if (cancelled) return
         setHistory(
           data

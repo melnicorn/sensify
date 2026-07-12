@@ -13,14 +13,8 @@ import { SensorIntervalForm } from '@/components/sensor-interval-form'
 import { PullStatusPanel } from '@/components/pull-status-panel'
 import { updateSensorMetaAction, updateDesiredIntervalAction } from '@/app/actions'
 import { convertTemperature, formatMetricValue, metricDisplayInfo } from '@/lib/units'
+import { RANGES, DEFAULT_RANGE, rangeHours } from '@/lib/chart-ranges'
 import type { SensorMeta, AppConfig } from '@/lib/types'
-
-const RANGES: Record<string, { label: string; hours: number }> = {
-  '1h': { label: '1 hour', hours: 1 },
-  '24h': { label: '24 hours', hours: 24 },
-  '7d': { label: '7 days', hours: 24 * 7 },
-  '30d': { label: '30 days', hours: 24 * 30 },
-}
 
 function fmtEventDuration(fromIso: string, toIso: string): string {
   const mins = Math.round((Date.parse(toIso) - Date.parse(fromIso)) / 60_000)
@@ -49,7 +43,7 @@ export default async function SensorDetailPage({
 }) {
   const { sensorId } = await params
   const { range: rawRange } = await searchParams
-  const range = rawRange && rawRange in RANGES ? rawRange : '7d'
+  const range = rawRange && rawRange in RANGES ? rawRange : DEFAULT_RANGE
 
   const [meta, config, channels, sensorRules, latest, events] = await Promise.all([
     getSensorMeta(sensorId),
@@ -63,7 +57,7 @@ export default async function SensorDetailPage({
   const ruleViews = await buildRuleViews(sensorRules)
 
   const now = new Date()
-  const from = new Date(now.getTime() - RANGES[range]!.hours * 3_600_000)
+  const from = new Date(now.getTime() - rangeHours(range) * 3_600_000)
   const readings = await getReadings(sensorId, from.toISOString(), now.toISOString())
 
   // Bind server actions to this sensor
@@ -176,27 +170,9 @@ export default async function SensorDetailPage({
         </div>
       )}
 
-      {/* Chart controls */}
-      <div className="flex items-center gap-2">
-        {Object.entries(RANGES).map(([key, { label }]) => (
-          <Link
-            key={key}
-            href={`/sensors/${sensorId}?range=${key}`}
-            className={`px-3 py-1.5 rounded-md text-sm transition-colors ${
-              range === key
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-            }`}
-          >
-            {label}
-          </Link>
-        ))}
-      </div>
-
       <SensorChartLive
-        key={range}
         meta={meta}
-        range={range}
+        initialRange={range}
         initialReadings={readings}
         config={config}
         channels={channels}
