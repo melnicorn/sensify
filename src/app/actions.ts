@@ -11,10 +11,12 @@ import {
   createPullSensor,
   updatePullSensor,
   setPullEnabled,
+  createMqttSensor,
+  setMqttEnabled,
   getReadings,
   getLatestMetrics,
 } from '@/lib/storage'
-import { PullDeviceInputSchema } from '@/lib/schemas'
+import { PullDeviceInputSchema, MqttDeviceInputSchema } from '@/lib/schemas'
 import { rangeHours } from '@/lib/chart-ranges'
 import type { MetricReading, LatestMetric } from '@/lib/types'
 
@@ -178,6 +180,31 @@ function extractSample(input: unknown): { lastSample: string | null } {
 
 export async function setPullEnabledAction(sensorId: string, enabled: boolean): Promise<void> {
   await setPullEnabled(sensorId, enabled)
+  revalidatePath(`/sensors/${sensorId}`)
+  revalidatePath('/')
+}
+
+// ---------- mqtt devices ----------
+
+export async function createMqttSensorAction(input: unknown): Promise<SavePullDeviceResult> {
+  const result = MqttDeviceInputSchema.safeParse(input)
+  if (!result.success) {
+    return { error: result.error.issues[0]?.message ?? 'Invalid MQTT sensor configuration' }
+  }
+  // The sample is the raw payload string (already JSON text), stored verbatim
+  // so the field mappings can be re-edited later — same role as pull's lastSample.
+  const rawSample =
+    input && typeof input === 'object' && 'sample' in input
+      ? (input as { sample: unknown }).sample
+      : null
+  const lastSample = typeof rawSample === 'string' ? rawSample.slice(0, 65536) : null
+  const id = await createMqttSensor({ ...result.data, lastSample })
+  revalidatePath('/')
+  return { id }
+}
+
+export async function setMqttEnabledAction(sensorId: string, enabled: boolean): Promise<void> {
+  await setMqttEnabled(sensorId, enabled)
   revalidatePath(`/sensors/${sensorId}`)
   revalidatePath('/')
 }

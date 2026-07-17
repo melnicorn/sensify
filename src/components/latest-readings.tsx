@@ -25,7 +25,7 @@ function timeAgo(isoStr: string, nowMs: number): string {
 function MetricIcon({ meta, metric }: { meta: SensorMeta; metric: string }) {
   const isTemp =
     (meta.type === 'push' && metric === 'temperature') ||
-    meta.pull?.fields.find((f) => f.metric === metric)?.unitKind === 'temperature'
+    (meta.pull ?? meta.mqtt)?.fields.find((f) => f.metric === metric)?.unitKind === 'temperature'
   if (isTemp) return <Thermometer size={14} className="text-primary shrink-0" />
   if (meta.type === 'push' && metric === 'humidity')
     return <Droplets size={14} className="text-primary shrink-0" />

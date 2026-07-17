@@ -1,10 +1,13 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@heroui/react'
-import { Radio, Square, X } from 'lucide-react'
+import { Radio, Square, X, Trash2 } from 'lucide-react'
 import { JsonTree } from '@/components/json-tree'
+import { createMqttSensorAction } from '@/app/actions'
 import type { MqttBrowseMessage } from '@/lib/mqtt-topic'
+import type { PullField } from '@/lib/types'
 
 const inputClass =
   'rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary'
@@ -14,13 +17,28 @@ type StreamEvent =
   | { type: 'ready'; filter: string }
   | { type: 'error'; error: string }
 
+function defaultMetricName(path: string): string {
+  return path
+    .replace(/\[(\d+)\]/g, '.$1')
+    .split('.')
+    .filter(Boolean)
+    .join('_')
+}
+
 export function MqttTopicBrowser() {
+  const router = useRouter()
   const [filter, setFilter] = useState('#')
   const [running, setRunning] = useState(false)
   const [messages, setMessages] = useState<Record<string, MqttBrowseMessage>>({})
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const esRef = useRef<EventSource | null>(null)
+
+  // Field selection + sensor details for the currently selected topic.
+  const [fields, setFields] = useState<PullField[]>([])
+  const [name, setName] = useState('')
+  const [saving, startSave] = useTransition()
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   function stop() {
     esRef.current?.close()
@@ -62,11 +80,64 @@ export function MqttTopicBrowser() {
     }
   }
 
+  // A sensor maps to one topic — reset the field selection when the topic changes.
+  useEffect(() => {
+    setFields([])
+    setSaveError(null)
+  }, [selectedTopic])
+
   // Close the stream if the user navigates away.
   useEffect(() => () => esRef.current?.close(), [])
 
   const topics = Object.values(messages).sort((a, b) => a.topic.localeCompare(b.topic))
   const selected = selectedTopic ? messages[selectedTopic] : undefined
+
+  function toggleField(path: string) {
+    setFields((prev) => {
+      const existing = prev.find((f) => f.path === path)
+      if (existing) return prev.filter((f) => f.path !== path)
+      return [...prev, { path, metric: defaultMetricName(path) }]
+    })
+  }
+
+  function updateField(path: string, patch: Partial<PullField>) {
+    setFields((prev) => prev.map((f) => (f.path === path ? { ...f, ...patch } : f)))
+  }
+
+  const duplicateMetrics = new Set(
+    fields.map((f) => f.metric.trim()).filter((m, i, arr) => arr.indexOf(m) !== i)
+  )
+  const canSave =
+    !!selected?.isJson &&
+    !!selectedTopic &&
+    name.trim() !== '' &&
+    fields.length > 0 &&
+    fields.every((f) => f.metric.trim() !== '') &&
+    duplicateMetrics.size === 0
+
+  function save() {
+    if (!selectedTopic || !selected) return
+    setSaveError(null)
+    const payload = {
+      name: name.trim(),
+      topic: selectedTopic,
+      fields: fields.map((f) => ({
+        path: f.path,
+        metric: f.metric.trim(),
+        unit: f.unit?.trim() || undefined,
+      })),
+      sample: selected.raw,
+    }
+    startSave(async () => {
+      const res = await createMqttSensorAction(payload)
+      if (res.error) {
+        setSaveError(res.error)
+      } else {
+        stop()
+        router.push(`/sensors/${res.id}`)
+      }
+    })
+  }
 
   return (
     <div className="space-y-4">
@@ -122,7 +193,13 @@ export function MqttTopicBrowser() {
       {/* Results */}
       {(running || topics.length > 0) && (
         <section className="rounded-lg border border-border bg-card p-4 space-y-3">
-          <h2 className="text-sm font-medium text-foreground">Payloads</h2>
+          <div>
+            <h2 className="text-sm font-medium text-foreground">Payload &amp; fields</h2>
+            <p className="text-xs text-muted-foreground mt-1">
+              Pick a topic, then tick the numeric or boolean values to record. Booleans are stored
+              as 0/1.
+            </p>
+          </div>
           {topics.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4 text-center">
               Waiting for messages… retained values show immediately; live ones appear as devices
@@ -155,11 +232,15 @@ export function MqttTopicBrowser() {
                 ))}
               </ul>
 
-              {/* Selected payload (updates live as new messages arrive) */}
+              {/* Selected payload — selectable when JSON, updates live */}
               <div className="rounded-md border border-border bg-background/50 p-3 font-mono text-xs leading-7 overflow-x-auto min-h-24">
                 {selected ? (
                   selected.isJson ? (
-                    <JsonTree value={selected.payload} />
+                    <JsonTree
+                      value={selected.payload}
+                      selected={new Set(fields.map((f) => f.path))}
+                      onToggle={toggleField}
+                    />
                   ) : (
                     <pre className="whitespace-pre-wrap break-words text-muted-foreground">
                       {selected.raw}
@@ -171,9 +252,86 @@ export function MqttTopicBrowser() {
               </div>
             </div>
           )}
-          <p className="text-xs text-muted-foreground">
-            Browsing only for now — picking fields and saving an MQTT sensor comes next.
-          </p>
+
+          {selected && !selected.isJson && (
+            <p className="text-xs text-muted-foreground">
+              This payload isn&apos;t JSON, so there are no fields to pick. MQTT sensors need a JSON
+              payload.
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* Create sensor */}
+      {selected?.isJson && fields.length > 0 && (
+        <section className="rounded-lg border border-border bg-card p-4 space-y-3">
+          <div>
+            <h2 className="text-sm font-medium text-foreground">Create MQTT sensor</h2>
+            <p className="text-xs text-muted-foreground mt-1">
+              Reading from <code className="font-mono">{selectedTopic}</code>
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <h3 className="text-xs font-medium text-muted-foreground">Selected fields</h3>
+            {fields.map((f) => (
+              <div key={f.path} className="flex items-center gap-2">
+                <code className="flex-1 min-w-0 truncate text-xs text-muted-foreground">{f.path}</code>
+                <input
+                  type="text"
+                  value={f.metric}
+                  onChange={(e) => updateField(f.path, { metric: e.target.value })}
+                  placeholder="metric_name"
+                  aria-label={`Metric name for ${f.path}`}
+                  className={`w-40 font-mono text-xs ${inputClass} ${
+                    duplicateMetrics.has(f.metric.trim()) || f.metric.trim() === ''
+                      ? 'border-destructive'
+                      : ''
+                  }`}
+                />
+                <input
+                  type="text"
+                  value={f.unit ?? ''}
+                  onChange={(e) => updateField(f.path, { unit: e.target.value })}
+                  placeholder="unit"
+                  aria-label={`Unit for ${f.path}`}
+                  className={`w-16 text-xs ${inputClass}`}
+                />
+                <button
+                  type="button"
+                  onClick={() => toggleField(f.path)}
+                  className="text-muted-foreground hover:text-destructive transition-colors"
+                  aria-label={`Remove ${f.path}`}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+            {duplicateMetrics.size > 0 && (
+              <p className="text-xs text-destructive">Metric names must be unique.</p>
+            )}
+          </div>
+
+          <div className="space-y-1">
+            <label htmlFor="mqtt-sensor-name" className="text-xs text-muted-foreground">
+              Sensor name
+            </label>
+            <input
+              id="mqtt-sensor-name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Rainforest"
+              className={`w-full sm:w-72 ${inputClass}`}
+            />
+          </div>
+
+          <div className="flex items-center justify-end gap-2">
+            {saveError && <span className="text-sm text-destructive mr-auto">{saveError}</span>}
+            <Button size="sm" onPress={save} isDisabled={!canSave || saving}>
+              {saving ? 'Saving…' : 'Create sensor'}
+            </Button>
+          </div>
         </section>
       )}
     </div>

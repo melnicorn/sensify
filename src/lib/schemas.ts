@@ -74,3 +74,27 @@ export const PullDeviceInputSchema = z.object({
 })
 
 export type PullDeviceInput = z.infer<typeof PullDeviceInputSchema>
+
+// ---------- mqtt devices ----------
+
+export const MqttDeviceInputSchema = z.object({
+  name: z.string().min(1).max(128),
+  // A sensor subscribes to one concrete topic — wildcards are for browsing only
+  topic: z
+    .string()
+    .min(1)
+    .max(512)
+    .refine((t) => !t.includes('+') && !t.includes('#'), {
+      message: 'A sensor topic must be a concrete topic (no + or # wildcards)',
+    }),
+  qos: z.number().int().min(0).max(2).optional(),
+  fields: z
+    .array(PullFieldSchema)
+    .min(1, 'Select at least one field to record')
+    .max(50)
+    .refine((fields) => new Set(fields.map((f) => f.metric)).size === fields.length, {
+      message: 'Metric names must be unique',
+    }),
+})
+
+export type MqttDeviceInput = z.infer<typeof MqttDeviceInputSchema>

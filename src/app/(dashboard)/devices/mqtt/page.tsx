@@ -17,10 +17,10 @@ export default function MqttBrowsePage() {
         <span className="text-sm text-foreground font-medium">Browse MQTT topics</span>
       </div>
       <div>
-        <h1 className="text-lg font-semibold text-foreground">Browse MQTT topics</h1>
+        <h1 className="text-lg font-semibold text-foreground">Add MQTT sensor</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Point at a topic filter to see what your devices are publishing to the broker. Useful for
-          confirming a device is connected and for discovering the shape of its payloads.
+          Listen to what your devices publish to the broker, then pick a topic, tick the fields to
+          record, and save it as a sensor.
         </p>
       </div>
       <MqttTopicBrowser />

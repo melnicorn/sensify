@@ -64,13 +64,16 @@ The poller picks up new and edited devices within about 15 seconds. Polling can 
 
 ## MQTT
 
-Sensify runs an [Eclipse Mosquitto](https://mosquitto.org/) broker (the `mosquitto` service) so devices can publish telemetry over MQTT — the protocol Tasmota, ESPHome, Shelly, Zigbee2MQTT and friends already speak — without any device-specific integration code. The `mqtt-ingest` service subscribes to the broker.
+Sensify runs an [Eclipse Mosquitto](https://mosquitto.org/) broker (the `mosquitto` service) so devices can publish telemetry over MQTT — the protocol Tasmota, ESPHome, Shelly, Zigbee2MQTT and friends already speak — without any device-specific integration code. The `mqtt-ingest` service subscribes to the broker and records readings, exactly like the poller does for pull devices.
 
-> **Configuring which topics become sensors** is being added incrementally. Today the broker is provisioned and `mqtt-ingest` connects and logs every message it receives — useful for confirming a device can reach the broker. Point a device at it and watch:
->
-> ```sh
-> docker compose -f docker-compose.prod.yml logs -f mqtt-ingest
-> ```
+### Adding an MQTT sensor
+
+1. Point your device at the broker (address `1883`, the credentials below).
+2. On the dashboard, **Add device → Browse MQTT topics**.
+3. Click **Listen** and pick your device's topic from the list as messages arrive (retained values appear immediately; live ones as the device publishes).
+4. Tick the numeric/boolean fields to record, name each metric (add a unit like `C` to get temperature normalization), name the sensor, and **Create sensor**.
+
+`mqtt-ingest` picks up new and edited sensors within about 15 seconds and starts recording. Ingest can be paused/resumed from the sensor's detail page. Retained messages are dropped rather than recorded — they replay stale state on reconnect, which would otherwise fabricate a reading with a current timestamp.
 
 ### Credentials
 

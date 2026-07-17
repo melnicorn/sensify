@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Wifi, Download, Upload } from 'lucide-react'
+import { ArrowLeft, Wifi, Download, Upload, Radio } from 'lucide-react'
 import { getSensorMeta, getReadings, getLatestMetrics, getConfig } from '@/lib/storage'
 import { listChannels, listRulesForSensor, listEventsForSensor } from '@/lib/alerts/repo'
 import { buildRuleViews } from '@/lib/alerts/views'
@@ -11,6 +11,7 @@ import { DeleteSensorButton } from '@/components/delete-sensor-button'
 import { SensorMetaPanel } from '@/components/sensor-meta-panel'
 import { SensorIntervalForm } from '@/components/sensor-interval-form'
 import { PullStatusPanel } from '@/components/pull-status-panel'
+import { MqttStatusPanel } from '@/components/mqtt-status-panel'
 import { updateSensorMetaAction, updateDesiredIntervalAction } from '@/app/actions'
 import { convertTemperature, formatMetricValue, metricDisplayInfo } from '@/lib/units'
 import { RANGES, DEFAULT_RANGE, rangeHours } from '@/lib/chart-ranges'
@@ -85,6 +86,8 @@ export default async function SensorDetailPage({
             <h1 className="flex items-center gap-2 text-lg font-semibold text-foreground">
               {meta.type === 'pull' ? (
                 <Download size={15} className="text-muted-foreground" aria-label="Pull device" />
+              ) : meta.type === 'mqtt' ? (
+                <Radio size={15} className="text-muted-foreground" aria-label="MQTT device" />
               ) : (
                 <Upload size={15} className="text-muted-foreground" aria-label="Push device" />
               )}
@@ -114,6 +117,8 @@ export default async function SensorDetailPage({
         <SensorMetaPanel meta={meta} editAction={metaAction} />
         {meta.type === 'pull' ? (
           <PullStatusPanel meta={meta} />
+        ) : meta.type === 'mqtt' ? (
+          <MqttStatusPanel meta={meta} />
         ) : (
           <SensorIntervalForm desiredInterval={meta.desiredInterval} setAction={intervalAction} />
         )}
