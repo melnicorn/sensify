@@ -135,13 +135,66 @@ CREATE TABLE alert_events (
 );
 CREATE INDEX idx_alert_events_rule ON alert_events (rule_id, started_at);
 `,
+  // 4: MQTT as a third ingest source. 'source' (the `type` column) becomes a
+  // mutable attribute — a sensor can move between pull and mqtt in place — so
+  // the CHECK is widened to include 'mqtt'. SQLite can't ALTER a CHECK, so the
+  // table is rebuilt; `topic`/`qos` are added for MQTT config. Field mappings
+  // reuse pull_fields (paths are payload-relative, transport-agnostic) and
+  // availability reuses last_seen/last_success/last_error. Runs with
+  // foreign_keys OFF (see migrate()) so the DROP doesn't cascade to children.
+  `
+CREATE TABLE sensors_new (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL DEFAULT 'push' CHECK (type IN ('push', 'pull', 'mqtt')),
+  name TEXT NOT NULL,
+  first_seen TEXT NOT NULL,
+  last_seen TEXT NOT NULL,
+  last_ip TEXT,
+  location TEXT,
+  floor INTEGER,
+  zone TEXT,
+  description TEXT,
+  hardware TEXT,
+  tags TEXT,
+  desired_interval INTEGER,
+  url TEXT,
+  poll_interval INTEGER,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  last_success TEXT,
+  last_error TEXT,
+  consecutive_failures INTEGER NOT NULL DEFAULT 0,
+  last_sample TEXT,
+  topic TEXT,
+  qos INTEGER
+);
+
+INSERT INTO sensors_new
+  (id, type, name, first_seen, last_seen, last_ip, location, floor, zone,
+   description, hardware, tags, desired_interval, url, poll_interval, enabled,
+   last_success, last_error, consecutive_failures, last_sample)
+  SELECT id, type, name, first_seen, last_seen, last_ip, location, floor, zone,
+   description, hardware, tags, desired_interval, url, poll_interval, enabled,
+   last_success, last_error, consecutive_failures, last_sample
+  FROM sensors;
+
+DROP TABLE sensors;
+ALTER TABLE sensors_new RENAME TO sensors;
+`,
 ]
 
 function migrate(database: Database.Database): void {
-  // The web and poller processes both open the database at boot. Each step
-  // takes a write lock (BEGIN IMMEDIATE) and re-reads user_version inside it,
-  // so whichever process loses the race skips the already-applied migration
-  // instead of failing on e.g. a duplicate ALTER TABLE.
+  // Some migrations rebuild a table (e.g. widening a CHECK constraint, which
+  // SQLite can't ALTER). Rebuilding means DROP-ing a table that child tables
+  // reference, and with foreign_keys ON a DROP performs an implicit DELETE
+  // that cascades to those children — so migrations run with FKs OFF. This
+  // pragma can only be changed outside a transaction; getDb() turns it back
+  // ON once migrations finish.
+  database.pragma('foreign_keys = OFF')
+
+  // The web, poller and mqtt-ingest processes all open the database at boot.
+  // Each step takes a write lock (BEGIN IMMEDIATE) and re-reads user_version
+  // inside it, so whichever process loses the race skips the already-applied
+  // migration instead of failing on e.g. a duplicate ALTER TABLE.
   for (;;) {
     const applied = database.transaction((): boolean => {
       const v = database.pragma('user_version', { simple: true }) as number
@@ -161,7 +214,7 @@ export function getDb(): Database.Database {
   db.pragma('journal_mode = WAL')
   db.pragma('synchronous = NORMAL')
   db.pragma('busy_timeout = 5000')
+  migrate(db) // runs with foreign_keys OFF (see migrate)
   db.pragma('foreign_keys = ON')
-  migrate(db)
   return db
 }
