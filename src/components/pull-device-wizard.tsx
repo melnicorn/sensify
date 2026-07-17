@@ -10,7 +10,7 @@ import {
   updatePullDeviceAction,
   type TestPullResult,
 } from '@/app/actions'
-import { joinPath } from '@/lib/json-path'
+import { JsonTree } from '@/components/json-tree'
 import type { PullField } from '@/lib/types'
 
 interface Props {
@@ -162,10 +162,8 @@ export function PullDeviceWizard({ mode, sensorId, initial }: Props) {
         </div>
         {tree !== undefined ? (
           <div className="rounded-md border border-border bg-background/50 p-3 font-mono text-xs leading-7 overflow-x-auto">
-            <JsonNode
+            <JsonTree
               value={tree}
-              path=""
-              label={null}
               selected={new Set(fields.map((f) => f.path))}
               onToggle={toggleField}
             />
@@ -265,75 +263,5 @@ export function PullDeviceWizard({ mode, sensorId, initial }: Props) {
         </Button>
       </div>
     </div>
-  )
-}
-
-// ---------- JSON tree ----------
-
-function isCapturableLeaf(v: unknown): boolean {
-  return (typeof v === 'number' && Number.isFinite(v)) || typeof v === 'boolean'
-}
-
-function JsonNode({
-  value,
-  path,
-  label,
-  selected,
-  onToggle,
-}: {
-  value: unknown
-  path: string
-  label: string | null
-  selected: Set<string>
-  onToggle: (path: string) => void
-}) {
-  if (value !== null && typeof value === 'object') {
-    const entries = Array.isArray(value)
-      ? value.map((v, i) => [i, v] as const)
-      : Object.entries(value)
-    return (
-      <div>
-        {label !== null && (
-          <div className="text-muted-foreground">
-            {label} <span className="opacity-60">{Array.isArray(value) ? '[ ]' : '{ }'}</span>
-          </div>
-        )}
-        <div className={label !== null ? 'pl-5 border-l border-border/50 ml-1' : ''}>
-          {entries.map(([key, child]) => (
-            <JsonNode
-              key={String(key)}
-              value={child}
-              path={joinPath(path, key)}
-              label={typeof key === 'number' ? `[${key}]` : key}
-              selected={selected}
-              onToggle={onToggle}
-            />
-          ))}
-        </div>
-      </div>
-    )
-  }
-
-  const capturable = isCapturableLeaf(value)
-  const display = JSON.stringify(value)
-  if (!capturable) {
-    return (
-      <div className="text-muted-foreground/60">
-        <span className="inline-block w-5" />
-        {label}: {display}
-      </div>
-    )
-  }
-  return (
-    <label className="flex items-center gap-1.5 cursor-pointer hover:bg-muted/50 rounded px-1 -mx-1">
-      <input
-        type="checkbox"
-        checked={selected.has(path)}
-        onChange={() => onToggle(path)}
-        className="accent-[var(--color-primary,currentColor)]"
-      />
-      <span className="text-foreground">{label}</span>
-      <span className="text-muted-foreground">: {display}</span>
-    </label>
   )
 }
