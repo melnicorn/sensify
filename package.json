@@ -11,13 +11,16 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "poller": "tsx src/poller/index.ts",
-    "poller:dev": "tsx watch src/poller/index.ts"
+    "poller:dev": "tsx watch src/poller/index.ts",
+    "ingest": "tsx src/ingest/index.ts",
+    "ingest:dev": "tsx watch src/ingest/index.ts"
   },
   "dependencies": {
     "@heroui/react": "^3.0.4",
     "@heroui/styles": "^3.0.4",
     "better-sqlite3": "^12.11.1",
     "lucide-react": "^0.511.0",
+    "mqtt": "^5.15.2",
     "next": "16.2.0",
     "next-themes": "^0.4.6",
     "react": "^19.2.0",
