@@ -105,7 +105,19 @@ export default async function SensorDetailPage({
               </p>
             )}
           </div>
-          <DeleteSensorButton sensorId={meta.id} sensorName={meta.name} />
+          <div className="flex shrink-0 items-center gap-2">
+            {meta.type !== 'mqtt' && (
+              <Link
+                href={`/devices/${meta.id}/mqtt`}
+                className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                title="Move this sensor onto MQTT, keeping its history"
+              >
+                <Radio size={13} />
+                Switch to MQTT
+              </Link>
+            )}
+            <DeleteSensorButton sensorId={meta.id} sensorName={meta.name} />
+          </div>
         </div>
       </div>
 

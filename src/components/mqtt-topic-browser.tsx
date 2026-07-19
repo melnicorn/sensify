@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@heroui/react'
 import { Radio, Square, X, Trash2 } from 'lucide-react'
 import { JsonTree } from '@/components/json-tree'
-import { createMqttSensorAction } from '@/app/actions'
+import { createMqttSensorAction, convertSensorToMqttAction } from '@/app/actions'
+import { getAtPath, isCapturable } from '@/lib/json-path'
 import type { MqttBrowseMessage } from '@/lib/mqtt-topic'
 import type { PullField } from '@/lib/types'
 
@@ -25,7 +26,24 @@ function defaultMetricName(path: string): string {
     .join('_')
 }
 
-export function MqttTopicBrowser() {
+interface Props {
+  /** 'convert' moves an existing sensor onto MQTT in place, keeping its history. */
+  mode?: 'create' | 'convert'
+  sensorId?: string
+  initialName?: string
+  /** Current field mappings (pull sensors) — re-ticked automatically when their paths resolve. */
+  existingFields?: PullField[]
+  /** Metric names this sensor already has readings for (push sensors have no field mappings). */
+  existingMetrics?: string[]
+}
+
+export function MqttTopicBrowser({
+  mode = 'create',
+  sensorId,
+  initialName,
+  existingFields,
+  existingMetrics,
+}: Props = {}) {
   const router = useRouter()
   const [filter, setFilter] = useState('#')
   const [running, setRunning] = useState(false)
@@ -36,7 +54,7 @@ export function MqttTopicBrowser() {
 
   // Field selection + sensor details for the currently selected topic.
   const [fields, setFields] = useState<PullField[]>([])
-  const [name, setName] = useState('')
+  const [name, setName] = useState(initialName ?? '')
   const [saving, startSave] = useTransition()
   const [saveError, setSaveError] = useState<string | null>(null)
 
@@ -80,11 +98,28 @@ export function MqttTopicBrowser() {
     }
   }
 
-  // A sensor maps to one topic — reset the field selection when the topic changes.
+  // Latest payloads, read inside the topic-change effect without re-running it
+  // on every incoming message.
+  const messagesRef = useRef(messages)
+  messagesRef.current = messages
+
+  // A sensor maps to one topic — reset the field selection when the topic
+  // changes. When converting, re-tick the existing mappings whose paths still
+  // resolve in this payload, so their metric names (and therefore their
+  // history) carry over unchanged.
   useEffect(() => {
-    setFields([])
     setSaveError(null)
-  }, [selectedTopic])
+    if (!selectedTopic) {
+      setFields([])
+      return
+    }
+    const msg = messagesRef.current[selectedTopic]
+    if (mode === 'convert' && msg?.isJson && existingFields?.length) {
+      setFields(existingFields.filter((f) => isCapturable(getAtPath(msg.payload, f.path))))
+    } else {
+      setFields([])
+    }
+  }, [selectedTopic, mode, existingFields])
 
   // Close the stream if the user navigates away.
   useEffect(() => () => esRef.current?.close(), [])
@@ -129,7 +164,10 @@ export function MqttTopicBrowser() {
       sample: selected.raw,
     }
     startSave(async () => {
-      const res = await createMqttSensorAction(payload)
+      const res =
+        mode === 'convert' && sensorId
+          ? await convertSensorToMqttAction(sensorId, payload)
+          : await createMqttSensorAction(payload)
       if (res.error) {
         setSaveError(res.error)
       } else {
@@ -138,6 +176,14 @@ export function MqttTopicBrowser() {
       }
     })
   }
+
+  // Existing metric series that this topic's selection will NOT feed. Their
+  // history is kept, but they stop receiving new readings after the switch.
+  const selectedMetrics = new Set(fields.map((f) => f.metric.trim()))
+  const orphanedMetrics =
+    mode === 'convert'
+      ? (existingMetrics ?? []).filter((m) => !selectedMetrics.has(m))
+      : []
 
   return (
     <div className="space-y-4">
@@ -266,11 +312,28 @@ export function MqttTopicBrowser() {
       {selected?.isJson && fields.length > 0 && (
         <section className="rounded-lg border border-border bg-card p-4 space-y-3">
           <div>
-            <h2 className="text-sm font-medium text-foreground">Create MQTT sensor</h2>
+            <h2 className="text-sm font-medium text-foreground">
+              {mode === 'convert' ? 'Switch this sensor to MQTT' : 'Create MQTT sensor'}
+            </h2>
             <p className="text-xs text-muted-foreground mt-1">
               Reading from <code className="font-mono">{selectedTopic}</code>
             </p>
+            {mode === 'convert' && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Same sensor, same history — only the transport changes. Keep each metric name as-is
+                and its existing readings continue in the same series.
+              </p>
+            )}
           </div>
+
+          {orphanedMetrics.length > 0 && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              No field is mapped to{' '}
+              <span className="font-mono">{orphanedMetrics.join(', ')}</span>. Existing readings are
+              kept, but {orphanedMetrics.length === 1 ? 'that metric' : 'those metrics'} will stop
+              getting new data after the switch.
+            </p>
+          )}
 
           <div className="space-y-1.5">
             <h3 className="text-xs font-medium text-muted-foreground">Selected fields</h3>
@@ -329,7 +392,7 @@ export function MqttTopicBrowser() {
           <div className="flex items-center justify-end gap-2">
             {saveError && <span className="text-sm text-destructive mr-auto">{saveError}</span>}
             <Button size="sm" onPress={save} isDisabled={!canSave || saving}>
-              {saving ? 'Saving…' : 'Create sensor'}
+              {saving ? 'Saving…' : mode === 'convert' ? 'Switch to MQTT' : 'Create sensor'}
             </Button>
           </div>
         </section>

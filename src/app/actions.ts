@@ -12,6 +12,7 @@ import {
   updatePullSensor,
   setPullEnabled,
   createMqttSensor,
+  convertSensorToMqtt,
   setMqttEnabled,
   getReadings,
   getLatestMetrics,
@@ -201,6 +202,30 @@ export async function createMqttSensorAction(input: unknown): Promise<SavePullDe
   const id = await createMqttSensor({ ...result.data, lastSample })
   revalidatePath('/')
   return { id }
+}
+
+/** Move an existing pull/push sensor onto MQTT in place, keeping its history. */
+export async function convertSensorToMqttAction(
+  sensorId: string,
+  input: unknown
+): Promise<SavePullDeviceResult> {
+  const result = MqttDeviceInputSchema.safeParse(input)
+  if (!result.success) {
+    return { error: result.error.issues[0]?.message ?? 'Invalid MQTT sensor configuration' }
+  }
+  const rawSample =
+    input && typeof input === 'object' && 'sample' in input
+      ? (input as { sample: unknown }).sample
+      : null
+  const lastSample = typeof rawSample === 'string' ? rawSample.slice(0, 65536) : null
+  try {
+    await convertSensorToMqtt(sensorId, { ...result.data, lastSample })
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Conversion failed' }
+  }
+  revalidatePath('/')
+  revalidatePath(`/sensors/${sensorId}`)
+  return { id: sensorId }
 }
 
 export async function setMqttEnabledAction(sensorId: string, enabled: boolean): Promise<void> {

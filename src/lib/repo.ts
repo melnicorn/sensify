@@ -433,6 +433,60 @@ export async function updateMqttSensor(
   tx()
 }
 
+/**
+ * Move an existing sensor onto MQTT **in place** — same row, same id, so its
+ * readings, alert rules and metadata carry over untouched. `source` (the type
+ * column) is a mutable attribute, not part of the sensor's identity: this is an
+ * edit, not a re-registration, which is what keeps history from forking.
+ *
+ * Reusing the same metric names means new readings append to the existing
+ * series; the caller (the convert UI) pre-fills them from the current mapping.
+ */
+export async function convertSensorToMqtt(
+  sensorId: string,
+  input: {
+    name: string
+    topic: string
+    qos?: number
+    fields: PullField[]
+    lastSample?: string | null
+  }
+): Promise<void> {
+  const db = getDb()
+  const tx = db.transaction(() => {
+    const existing = db.prepare('SELECT type FROM sensors WHERE id = ?').get(sensorId) as
+      | { type: SensorType }
+      | undefined
+    if (!existing) throw new Error(`Sensor ${sensorId} not found`)
+
+    db.prepare(
+      `UPDATE sensors SET
+         type = 'mqtt',
+         name = ?,
+         topic = ?,
+         qos = ?,
+         url = NULL,
+         poll_interval = NULL,
+         desired_interval = NULL,
+         enabled = 1,
+         last_error = NULL,
+         consecutive_failures = 0,
+         last_sample = COALESCE(?, last_sample)
+       WHERE id = ?`
+    ).run(input.name, input.topic, input.qos ?? 1, input.lastSample ?? null, sensorId)
+
+    // Field mappings are replaced wholesale (pull_fields is shared by both
+    // sources); readings are keyed by (sensor_id, metric) and are untouched.
+    db.prepare('DELETE FROM pull_fields WHERE sensor_id = ?').run(sensorId)
+    const insert = db.prepare(
+      'INSERT INTO pull_fields (sensor_id, path, metric, unit, unit_kind) VALUES (?, ?, ?, ?, ?)'
+    )
+    for (const f of input.fields)
+      insert.run(sensorId, f.path, f.metric, f.unit ?? null, parseUnitLabel(f.unit)?.kind ?? null)
+  })
+  tx()
+}
+
 export async function setMqttEnabled(sensorId: string, enabled: boolean): Promise<void> {
   const result = getDb()
     .prepare("UPDATE sensors SET enabled = ? WHERE id = ? AND type = 'mqtt'")
