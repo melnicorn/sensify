@@ -146,10 +146,17 @@ Requires Node 22+ and pnpm.
 ```sh
 pnpm install
 pnpm dev         # web UI on http://localhost:3000
-pnpm poller:dev  # poller, in a second terminal
+pnpm poller:dev  # poller, in a second terminal (only needed for pull devices)
+pnpm ingest:dev  # mqtt-ingest, in a third terminal (only needed for MQTT sensors)
 ```
 
-Both processes share a SQLite database at `./data/sensify.db` (override the location with the `DATA_DIR` environment variable).
+These are three separate processes, like the three Docker containers. `pnpm dev`
+alone runs the dashboard but records nothing from pull or MQTT devices — the
+`poller` and `mqtt-ingest` processes are what write those readings. Run exactly
+one `mqtt-ingest` (a second instance double-records every message). It connects
+to `MQTT_URL` (default `mqtt://localhost:1883`); see [MQTT](#mqtt).
+
+All processes share a SQLite database at `./data/sensify.db` (override the location with the `DATA_DIR` environment variable).
 
 To build images locally instead of pulling from GHCR:
 
