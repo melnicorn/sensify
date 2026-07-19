@@ -532,6 +532,25 @@ export async function convertSensorToMqtt(
   tx()
 }
 
+/**
+ * Delete a sensor's readings for specific metrics. Used when a field mapping is
+ * removed and the operator explicitly asks to drop its history too — e.g. a
+ * metric that never produced real data over this transport. Opt-in, because
+ * readings are otherwise kept: an unmapped metric simply stops growing.
+ */
+export async function deleteReadingsForMetrics(
+  sensorId: string,
+  metrics: string[]
+): Promise<number> {
+  if (metrics.length === 0) return 0
+  const db = getDb()
+  const placeholders = metrics.map(() => '?').join(', ')
+  const result = db
+    .prepare(`DELETE FROM readings WHERE sensor_id = ? AND metric IN (${placeholders})`)
+    .run(sensorId, ...metrics)
+  return result.changes
+}
+
 export async function setMqttEnabled(sensorId: string, enabled: boolean): Promise<void> {
   const result = getDb()
     .prepare("UPDATE sensors SET enabled = ? WHERE id = ? AND type = 'mqtt'")

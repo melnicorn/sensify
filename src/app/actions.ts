@@ -12,7 +12,9 @@ import {
   updatePullSensor,
   setPullEnabled,
   createMqttSensor,
+  updateMqttSensor,
   convertSensorToMqtt,
+  deleteReadingsForMetrics,
   setMqttEnabled,
   getSensorMeta,
   getReadings,
@@ -204,6 +206,49 @@ export async function createMqttSensorAction(input: unknown): Promise<SavePullDe
   const id = await createMqttSensor({ ...result.data, lastSample })
   revalidatePath('/')
   return { id }
+}
+
+/**
+ * Edit an existing MQTT sensor's topics and field mappings.
+ *
+ * Readings are keyed by (sensor_id, metric), so a metric that is removed or
+ * renamed simply stops growing — its history is kept by default. Callers can
+ * opt into dropping that history via `deleteRemovedData`, for mappings that
+ * never produced anything worth keeping.
+ */
+export async function updateMqttSensorAction(
+  sensorId: string,
+  input: unknown,
+  options?: { deleteRemovedData?: boolean }
+): Promise<SavePullDeviceResult> {
+  const result = MqttDeviceInputSchema.safeParse(input)
+  if (!result.success) {
+    return { error: result.error.issues[0]?.message ?? 'Invalid MQTT sensor configuration' }
+  }
+  const rawSample =
+    input && typeof input === 'object' && 'sample' in input
+      ? (input as { sample: unknown }).sample
+      : null
+  const lastSample = typeof rawSample === 'string' ? rawSample.slice(0, 65536) : null
+
+  // Which metric series will no longer be written after this edit?
+  const before = await getSensorMeta(sensorId)
+  const keptMetrics = new Set(result.data.fields.map((f) => f.metric))
+  const droppedMetrics = (before?.mqtt?.fields ?? [])
+    .map((f) => f.metric)
+    .filter((m) => !keptMetrics.has(m))
+
+  try {
+    await updateMqttSensor(sensorId, { ...result.data, lastSample })
+    if (options?.deleteRemovedData && droppedMetrics.length > 0) {
+      await deleteReadingsForMetrics(sensorId, droppedMetrics)
+    }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Update failed' }
+  }
+  revalidatePath('/')
+  revalidatePath(`/sensors/${sensorId}`)
+  return { id: sensorId }
 }
 
 /** Move an existing pull/push sensor onto MQTT in place, keeping its history. */

@@ -3,11 +3,15 @@
 import { useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@heroui/react'
-import { Radio, Square, X, Trash2 } from 'lucide-react'
+import { Radio, Square, X, Trash2, Copy, Check } from 'lucide-react'
 import { JsonTree } from '@/components/json-tree'
-import { createMqttSensorAction, convertSensorToMqttAction } from '@/app/actions'
+import {
+  createMqttSensorAction,
+  convertSensorToMqttAction,
+  updateMqttSensorAction,
+} from '@/app/actions'
 import { getAtPath, isCapturable } from '@/lib/json-path'
-import type { MqttBrowseMessage } from '@/lib/mqtt-topic'
+import { parseMqttPayload, type MqttBrowseMessage } from '@/lib/mqtt-topic'
 import type { PullField } from '@/lib/types'
 
 const inputClass =
@@ -27,14 +31,23 @@ function defaultMetricName(path: string): string {
 }
 
 interface Props {
-  /** 'convert' moves an existing sensor onto MQTT in place, keeping its history. */
-  mode?: 'create' | 'convert'
+  /**
+   * 'convert' moves an existing pull/push sensor onto MQTT in place;
+   * 'edit' changes an existing MQTT sensor's topics and field mappings.
+   */
+  mode?: 'create' | 'convert' | 'edit'
   sensorId?: string
   initialName?: string
-  /** Current field mappings (pull sensors) — re-ticked automatically when their paths resolve. */
+  /** Current field mappings — re-ticked automatically when their paths resolve. */
   existingFields?: PullField[]
   /** Metric names this sensor already has readings for (push sensors have no field mappings). */
   existingMetrics?: string[]
+  /** Edit mode: the sensor's current topics, so nothing is silently cleared on save. */
+  initialTopic?: string
+  initialAvailabilityTopic?: string | null
+  initialConfigTopic?: string | null
+  /** Edit mode: last payload seen, so the tree renders without waiting for a publish. */
+  initialSample?: string | null
 }
 
 export function MqttTopicBrowser({
@@ -43,20 +56,36 @@ export function MqttTopicBrowser({
   initialName,
   existingFields,
   existingMetrics,
+  initialTopic,
+  initialAvailabilityTopic,
+  initialConfigTopic,
+  initialSample,
 }: Props = {}) {
   const router = useRouter()
-  const [filter, setFilter] = useState('#')
+  const [filter, setFilter] = useState(mode === 'edit' && initialTopic ? initialTopic : '#')
   const [running, setRunning] = useState(false)
-  const [messages, setMessages] = useState<Record<string, MqttBrowseMessage>>({})
-  const [selectedTopic, setSelectedTopic] = useState<string | null>(null)
+  // Editing starts from the stored payload so the tree is usable immediately;
+  // Listen then refreshes it from live traffic.
+  const [messages, setMessages] = useState<Record<string, MqttBrowseMessage>>(() => {
+    if (mode !== 'edit' || !initialTopic || !initialSample) return {}
+    const { payload, isJson } = parseMqttPayload(initialSample)
+    return {
+      [initialTopic]: { topic: initialTopic, retain: false, payload, raw: initialSample, isJson },
+    }
+  })
+  const [selectedTopic, setSelectedTopic] = useState<string | null>(
+    mode === 'edit' ? (initialTopic ?? null) : null
+  )
   const [error, setError] = useState<string | null>(null)
   const esRef = useRef<EventSource | null>(null)
 
   // Field selection + sensor details for the currently selected topic.
-  const [fields, setFields] = useState<PullField[]>([])
+  const [fields, setFields] = useState<PullField[]>(mode === 'edit' ? (existingFields ?? []) : [])
   const [name, setName] = useState(initialName ?? '')
-  const [availabilityTopic, setAvailabilityTopic] = useState('')
-  const [configTopic, setConfigTopic] = useState('')
+  const [availabilityTopic, setAvailabilityTopic] = useState(initialAvailabilityTopic ?? '')
+  const [configTopic, setConfigTopic] = useState(initialConfigTopic ?? '')
+  const [deleteRemovedData, setDeleteRemovedData] = useState(false)
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [saving, startSave] = useTransition()
   const [saveError, setSaveError] = useState<string | null>(null)
 
@@ -109,14 +138,22 @@ export function MqttTopicBrowser({
   // changes. When converting, re-tick the existing mappings whose paths still
   // resolve in this payload, so their metric names (and therefore their
   // history) carry over unchanged.
+  // Editing seeds topic/fields/topics from the saved sensor; don't let the
+  // mount-time run of this effect wipe them.
+  const skipTopicReset = useRef(mode === 'edit')
+
   useEffect(() => {
     setSaveError(null)
+    if (skipTopicReset.current) {
+      skipTopicReset.current = false
+      return
+    }
     if (!selectedTopic) {
       setFields([])
       return
     }
     const msg = messagesRef.current[selectedTopic]
-    if (mode === 'convert' && msg?.isJson && existingFields?.length) {
+    if ((mode === 'convert' || mode === 'edit') && msg?.isJson && existingFields?.length) {
       setFields(existingFields.filter((f) => isCapturable(getAtPath(msg.payload, f.path))))
     } else {
       setFields([])
@@ -132,6 +169,44 @@ export function MqttTopicBrowser({
 
   const topics = Object.values(messages).sort((a, b) => a.topic.localeCompare(b.topic))
   const selected = selectedTopic ? messages[selectedTopic] : undefined
+
+  /** Legacy copy path: works on plain http and when the document isn't focused. */
+  function legacyCopy(text: string): boolean {
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      const ok = document.execCommand('copy')
+      document.body.removeChild(ta)
+      return ok
+    } catch {
+      return false
+    }
+  }
+
+  async function copyRaw() {
+    if (!selected) return
+    const text = selected.raw
+    let ok = false
+    // Sensify is usually reached over plain http on a LAN address, which isn't
+    // a secure context, so the async clipboard API is often unavailable — and
+    // it can reject even where it exists. Fall back rather than fail silently.
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(text)
+        ok = true
+      } catch {
+        ok = legacyCopy(text)
+      }
+    } else {
+      ok = legacyCopy(text)
+    }
+    setCopyState(ok ? 'copied' : 'failed')
+    setTimeout(() => setCopyState('idle'), 2000)
+  }
 
   function toggleField(path: string) {
     setFields((prev) => {
@@ -173,7 +248,9 @@ export function MqttTopicBrowser({
     }
     startSave(async () => {
       const res =
-        mode === 'convert' && sensorId
+        mode === 'edit' && sensorId
+          ? await updateMqttSensorAction(sensorId, payload, { deleteRemovedData })
+          : mode === 'convert' && sensorId
           ? await convertSensorToMqttAction(sensorId, payload)
           : await createMqttSensorAction(payload)
       if (res.error) {
@@ -185,13 +262,22 @@ export function MqttTopicBrowser({
     })
   }
 
-  // Existing metric series that this topic's selection will NOT feed. Their
-  // history is kept, but they stop receiving new readings after the switch.
+  // Existing metric series that this selection will NOT feed. Their history is
+  // kept, but they stop receiving new readings — covers both removing a field
+  // and renaming its metric (a rename starts a fresh series).
   const selectedMetrics = new Set(fields.map((f) => f.metric.trim()))
   const orphanedMetrics =
-    mode === 'convert'
+    mode === 'convert' || mode === 'edit'
       ? (existingMetrics ?? []).filter((m) => !selectedMetrics.has(m))
       : []
+
+  // Mapped paths that aren't in the payload we're looking at — the usual reason
+  // to remove a field (e.g. a value the device stopped publishing).
+  const missingPaths = new Set(
+    selected?.isJson
+      ? fields.filter((f) => !isCapturable(getAtPath(selected.payload, f.path))).map((f) => f.path)
+      : []
+  )
 
   return (
     <div className="space-y-4">
@@ -248,7 +334,28 @@ export function MqttTopicBrowser({
       {(running || topics.length > 0) && (
         <section className="rounded-lg border border-border bg-card p-4 space-y-3">
           <div>
-            <h2 className="text-sm font-medium text-foreground">Payload &amp; fields</h2>
+            <div className="flex items-start justify-between gap-3">
+              <h2 className="text-sm font-medium text-foreground">Payload &amp; fields</h2>
+              {selected && (
+                <button
+                  type="button"
+                  onClick={copyRaw}
+                  className={`flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors ${
+                    copyState === 'failed'
+                      ? 'border-destructive/40 text-destructive'
+                      : 'border-border text-muted-foreground hover:text-foreground'
+                  }`}
+                  title={`Copy the raw payload of ${selected.topic}`}
+                >
+                  {copyState === 'copied' ? <Check size={12} /> : <Copy size={12} />}
+                  {copyState === 'copied'
+                    ? 'Copied'
+                    : copyState === 'failed'
+                      ? 'Copy blocked'
+                      : 'Copy raw JSON'}
+                </button>
+              )}
+            </div>
             <p className="text-xs text-muted-foreground mt-1">
               Pick a topic, then tick the numeric or boolean values to record. Booleans are stored
               as 0/1.
@@ -321,7 +428,11 @@ export function MqttTopicBrowser({
         <section className="rounded-lg border border-border bg-card p-4 space-y-3">
           <div>
             <h2 className="text-sm font-medium text-foreground">
-              {mode === 'convert' ? 'Switch this sensor to MQTT' : 'Create MQTT sensor'}
+              {mode === 'convert'
+                ? 'Switch this sensor to MQTT'
+                : mode === 'edit'
+                  ? 'Edit MQTT sensor'
+                  : 'Create MQTT sensor'}
             </h2>
             <p className="text-xs text-muted-foreground mt-1">
               Reading from <code className="font-mono">{selectedTopic}</code>
@@ -335,19 +446,50 @@ export function MqttTopicBrowser({
           </div>
 
           {orphanedMetrics.length > 0 && (
-            <p className="text-xs text-amber-600 dark:text-amber-400">
-              No field is mapped to{' '}
-              <span className="font-mono">{orphanedMetrics.join(', ')}</span>. Existing readings are
-              kept, but {orphanedMetrics.length === 1 ? 'that metric' : 'those metrics'} will stop
-              getting new data after the switch.
-            </p>
+            <div className="space-y-1.5 rounded-md border border-amber-600/30 bg-amber-500/5 p-2.5">
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                No field is mapped to{' '}
+                <span className="font-mono">{orphanedMetrics.join(', ')}</span>. Existing readings
+                are kept, but {orphanedMetrics.length === 1 ? 'that metric' : 'those metrics'} will
+                stop getting new data
+                {mode === 'edit' ? '' : ' after the switch'}. Renaming a metric has the same effect
+                — the old series stops and a new one starts.
+              </p>
+              {mode === 'edit' && (
+                <label className="flex items-start gap-1.5 text-xs text-muted-foreground cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={deleteRemovedData}
+                    onChange={(e) => setDeleteRemovedData(e.target.checked)}
+                    className="mt-0.5 accent-[var(--color-primary,currentColor)]"
+                  />
+                  <span>
+                    Also delete existing readings for{' '}
+                    <span className="font-mono">{orphanedMetrics.join(', ')}</span>. Permanent —
+                    use this for a metric that never produced real data.
+                  </span>
+                </label>
+              )}
+            </div>
           )}
 
           <div className="space-y-1.5">
             <h3 className="text-xs font-medium text-muted-foreground">Selected fields</h3>
             {fields.map((f) => (
               <div key={f.path} className="flex items-center gap-2">
-                <code className="flex-1 min-w-0 truncate text-xs text-muted-foreground">{f.path}</code>
+                <code
+                  className={`flex-1 min-w-0 truncate text-xs ${
+                    missingPaths.has(f.path) ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'
+                  }`}
+                  title={
+                    missingPaths.has(f.path)
+                      ? 'Not present in this payload — the device may have stopped publishing it'
+                      : f.path
+                  }
+                >
+                  {f.path}
+                  {missingPaths.has(f.path) && ' — not in payload'}
+                </code>
                 <input
                   type="text"
                   value={f.metric}
@@ -408,14 +550,20 @@ export function MqttTopicBrowser({
                 className={`w-full font-mono text-xs ${inputClass}`}
               >
                 <option value="">None</option>
-                {topics
-                  .map((m) => m.topic)
-                  .filter((t) => t !== selectedTopic)
-                  .map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
+                {Array.from(
+                  new Set(
+                    [
+                      // Keep the saved value selectable even before Listen has
+                      // rediscovered it, so editing can't silently clear it.
+                      ...(availabilityTopic ? [availabilityTopic] : []),
+                      ...topics.map((m) => m.topic),
+                    ].filter((t) => t !== selectedTopic)
+                  )
+                ).map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
               </select>
               <p className="text-[11px] text-muted-foreground">
                 Carries online/offline, so the sensor can show when the device drops.
@@ -447,7 +595,13 @@ export function MqttTopicBrowser({
           <div className="flex items-center justify-end gap-2">
             {saveError && <span className="text-sm text-destructive mr-auto">{saveError}</span>}
             <Button size="sm" onPress={save} isDisabled={!canSave || saving}>
-              {saving ? 'Saving…' : mode === 'convert' ? 'Switch to MQTT' : 'Create sensor'}
+              {saving
+                ? 'Saving…'
+                : mode === 'convert'
+                  ? 'Switch to MQTT'
+                  : mode === 'edit'
+                    ? 'Save changes'
+                    : 'Create sensor'}
             </Button>
           </div>
         </section>
