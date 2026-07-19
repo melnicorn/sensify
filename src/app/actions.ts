@@ -14,10 +14,12 @@ import {
   createMqttSensor,
   convertSensorToMqtt,
   setMqttEnabled,
+  getSensorMeta,
   getReadings,
   getLatestMetrics,
 } from '@/lib/storage'
 import { PullDeviceInputSchema, MqttDeviceInputSchema } from '@/lib/schemas'
+import { publishRetained } from '@/lib/mqtt-publish'
 import { rangeHours } from '@/lib/chart-ranges'
 import type { MetricReading, LatestMetric } from '@/lib/types'
 
@@ -226,6 +228,38 @@ export async function convertSensorToMqttAction(
   revalidatePath('/')
   revalidatePath(`/sensors/${sensorId}`)
   return { id: sensorId }
+}
+
+/**
+ * Set an MQTT device's reporting interval and publish it retained to the
+ * sensor's config topic — the MQTT counterpart to the push API returning
+ * `{ config: { interval } }`. Clearing it removes the retained message.
+ */
+export async function setMqttConfigIntervalAction(
+  sensorId: string,
+  interval: number | null
+): Promise<{ error?: string; success?: boolean }> {
+  if (interval !== null && (!Number.isInteger(interval) || interval < 5 || interval > 86400)) {
+    return { error: 'Interval must be between 5 and 86400 seconds' }
+  }
+  await updateDesiredInterval(sensorId, interval)
+
+  const meta = await getSensorMeta(sensorId)
+  const topic = meta?.mqtt?.configTopic
+  if (topic) {
+    try {
+      // An empty payload clears the retained config.
+      await publishRetained(topic, interval === null ? '' : JSON.stringify({ interval }))
+    } catch (err) {
+      return {
+        error: `Saved, but publishing to ${topic} failed: ${
+          err instanceof Error ? err.message : 'unknown error'
+        }`,
+      }
+    }
+  }
+  revalidatePath(`/sensors/${sensorId}`)
+  return { success: true }
 }
 
 export async function setMqttEnabledAction(sensorId: string, enabled: boolean): Promise<void> {

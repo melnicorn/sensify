@@ -55,6 +55,8 @@ export function MqttTopicBrowser({
   // Field selection + sensor details for the currently selected topic.
   const [fields, setFields] = useState<PullField[]>([])
   const [name, setName] = useState(initialName ?? '')
+  const [availabilityTopic, setAvailabilityTopic] = useState('')
+  const [configTopic, setConfigTopic] = useState('')
   const [saving, startSave] = useTransition()
   const [saveError, setSaveError] = useState<string | null>(null)
 
@@ -119,6 +121,10 @@ export function MqttTopicBrowser({
     } else {
       setFields([])
     }
+    // Suggest a sibling topic that looks like an availability signal; the
+    // operator can change or clear it.
+    const others = Object.keys(messagesRef.current).filter((t) => t !== selectedTopic)
+    setAvailabilityTopic(others.find((t) => /status|online|avail|lwt|state/i.test(t)) ?? '')
   }, [selectedTopic, mode, existingFields])
 
   // Close the stream if the user navigates away.
@@ -156,6 +162,8 @@ export function MqttTopicBrowser({
     const payload = {
       name: name.trim(),
       topic: selectedTopic,
+      availabilityTopic: availabilityTopic.trim() || undefined,
+      configTopic: configTopic.trim() || undefined,
       fields: fields.map((f) => ({
         path: f.path,
         metric: f.metric.trim(),
@@ -375,19 +383,66 @@ export function MqttTopicBrowser({
             )}
           </div>
 
-          <div className="space-y-1">
-            <label htmlFor="mqtt-sensor-name" className="text-xs text-muted-foreground">
-              Sensor name
-            </label>
-            <input
-              id="mqtt-sensor-name"
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Rainforest"
-              className={`w-full sm:w-72 ${inputClass}`}
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label htmlFor="mqtt-sensor-name" className="text-xs text-muted-foreground">
+                Sensor name
+              </label>
+              <input
+                id="mqtt-sensor-name"
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Rainforest"
+                className={`w-full ${inputClass}`}
+              />
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="mqtt-availability" className="text-xs text-muted-foreground">
+                Availability topic (optional)
+              </label>
+              <select
+                id="mqtt-availability"
+                value={availabilityTopic}
+                onChange={(e) => setAvailabilityTopic(e.target.value)}
+                className={`w-full font-mono text-xs ${inputClass}`}
+              >
+                <option value="">None</option>
+                {topics
+                  .map((m) => m.topic)
+                  .filter((t) => t !== selectedTopic)
+                  .map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+              </select>
+              <p className="text-[11px] text-muted-foreground">
+                Carries online/offline, so the sensor can show when the device drops.
+              </p>
+            </div>
           </div>
+
+          <details className="text-xs">
+            <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+              Device config topic (optional)
+            </summary>
+            <div className="mt-2 space-y-1">
+              <input
+                type="text"
+                value={configTopic}
+                onChange={(e) => setConfigTopic(e.target.value)}
+                placeholder="sensify/config/esp32-abc123"
+                aria-label="Device config topic"
+                className={`w-full font-mono text-xs ${inputClass}`}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Sensify publishes <code>{'{"interval": <seconds>}'}</code> here with the retain flag
+                when you set a reporting interval. A device that subscribes gets its config
+                immediately on connect. Leave blank if your device doesn&apos;t read config.
+              </p>
+            </div>
+          </details>
 
           <div className="flex items-center justify-end gap-2">
             {saveError && <span className="text-sm text-destructive mr-auto">{saveError}</span>}

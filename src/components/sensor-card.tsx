@@ -99,6 +99,12 @@ export function SensorCard({ meta, latest, config }: Props) {
         </div>
       )}
 
+      {meta.mqtt?.online === false && (
+        <p className="flex items-center gap-1 text-xs text-destructive mb-2">
+          <AlertTriangle size={12} className="shrink-0" />
+          Device offline
+        </p>
+      )}
       {srcPaused && (
         <p className="flex items-center gap-1 text-xs text-muted-foreground mb-2">
           <PauseCircle size={12} />

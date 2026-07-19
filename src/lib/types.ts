@@ -34,6 +34,15 @@ export interface MqttConfig {
   lastError?: string | null
   consecutiveFailures: number
   lastSample?: string | null // raw payload of the last message (for re-editing field mappings)
+  // Device availability (the LWT convention: retained "online", with "offline"
+  // published by the broker if the device drops). Feeds the same health UI as
+  // pull polling status. online is null until an availability message arrives.
+  availabilityTopic?: string | null
+  online?: boolean | null
+  onlineAt?: string | null
+  // Where Sensify publishes retained device config (the MQTT replacement for
+  // the push API returning config in its response).
+  configTopic?: string | null
 }
 
 export interface SensorMeta {

@@ -180,6 +180,18 @@ INSERT INTO sensors_new
 DROP TABLE sensors;
 ALTER TABLE sensors_new RENAME TO sensors;
 `,
+  // 5: MQTT availability + device config. availability_topic carries the
+  // device's online/offline signal (the LWT convention: a retained "online",
+  // with an "offline" will published by the broker if the device drops), which
+  // feeds the same health UI pull devices use. config_topic is where Sensify
+  // publishes retained device config — the MQTT replacement for the push API's
+  // config-in-the-response, which has no request/response idiom here.
+  `
+ALTER TABLE sensors ADD COLUMN availability_topic TEXT;
+ALTER TABLE sensors ADD COLUMN online INTEGER;
+ALTER TABLE sensors ADD COLUMN online_at TEXT;
+ALTER TABLE sensors ADD COLUMN config_topic TEXT;
+`,
 ]
 
 function migrate(database: Database.Database): void {

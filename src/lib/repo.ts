@@ -37,6 +37,10 @@ interface SensorRow {
   last_sample: string | null
   topic: string | null
   qos: number | null
+  availability_topic: string | null
+  online: number | null
+  online_at: string | null
+  config_topic: string | null
 }
 
 function rowToMeta(row: SensorRow, fields: PullField[]): SensorMeta {
@@ -76,6 +80,10 @@ function rowToMeta(row: SensorRow, fields: PullField[]): SensorMeta {
       lastError: row.last_error,
       consecutiveFailures: row.consecutive_failures,
       lastSample: row.last_sample,
+      availabilityTopic: row.availability_topic,
+      online: row.online === null ? null : row.online === 1,
+      onlineAt: row.online_at,
+      configTopic: row.config_topic,
     }
   }
   return meta
@@ -382,6 +390,8 @@ export async function createMqttSensor(input: {
   name: string
   topic: string
   qos?: number
+  availabilityTopic?: string | null
+  configTopic?: string | null
   fields: PullField[]
   lastSample?: string | null
 }): Promise<string> {
@@ -390,9 +400,20 @@ export async function createMqttSensor(input: {
   const now = new Date().toISOString()
   const tx = db.transaction(() => {
     db.prepare(
-      `INSERT INTO sensors (id, type, name, first_seen, last_seen, topic, qos, enabled, last_sample)
-       VALUES (?, 'mqtt', ?, ?, ?, ?, ?, 1, ?)`
-    ).run(id, input.name, now, now, input.topic, input.qos ?? 1, input.lastSample ?? null)
+      `INSERT INTO sensors
+         (id, type, name, first_seen, last_seen, topic, qos, availability_topic, config_topic, enabled, last_sample)
+       VALUES (?, 'mqtt', ?, ?, ?, ?, ?, ?, ?, 1, ?)`
+    ).run(
+      id,
+      input.name,
+      now,
+      now,
+      input.topic,
+      input.qos ?? 1,
+      input.availabilityTopic || null,
+      input.configTopic || null,
+      input.lastSample ?? null
+    )
     const insert = db.prepare(
       'INSERT INTO pull_fields (sensor_id, path, metric, unit, unit_kind) VALUES (?, ?, ?, ?, ?)'
     )
@@ -409,6 +430,8 @@ export async function updateMqttSensor(
     name: string
     topic: string
     qos?: number
+    availabilityTopic?: string | null
+    configTopic?: string | null
     fields: PullField[]
     lastSample?: string | null
   }
@@ -418,10 +441,19 @@ export async function updateMqttSensor(
     const result = db
       .prepare(
         `UPDATE sensors SET name = ?, topic = ?, qos = ?,
+         availability_topic = ?, config_topic = ?,
          last_sample = COALESCE(?, last_sample)
          WHERE id = ? AND type = 'mqtt'`
       )
-      .run(input.name, input.topic, input.qos ?? 1, input.lastSample ?? null, sensorId)
+      .run(
+        input.name,
+        input.topic,
+        input.qos ?? 1,
+        input.availabilityTopic || null,
+        input.configTopic || null,
+        input.lastSample ?? null,
+        sensorId
+      )
     if (result.changes === 0) throw new Error(`MQTT sensor ${sensorId} not found`)
     db.prepare('DELETE FROM pull_fields WHERE sensor_id = ?').run(sensorId)
     const insert = db.prepare(
@@ -448,6 +480,8 @@ export async function convertSensorToMqtt(
     name: string
     topic: string
     qos?: number
+    availabilityTopic?: string | null
+    configTopic?: string | null
     fields: PullField[]
     lastSample?: string | null
   }
@@ -465,15 +499,26 @@ export async function convertSensorToMqtt(
          name = ?,
          topic = ?,
          qos = ?,
+         availability_topic = ?,
+         config_topic = ?,
          url = NULL,
          poll_interval = NULL,
-         desired_interval = NULL,
          enabled = 1,
          last_error = NULL,
          consecutive_failures = 0,
+         online = NULL,
+         online_at = NULL,
          last_sample = COALESCE(?, last_sample)
        WHERE id = ?`
-    ).run(input.name, input.topic, input.qos ?? 1, input.lastSample ?? null, sensorId)
+    ).run(
+      input.name,
+      input.topic,
+      input.qos ?? 1,
+      input.availabilityTopic || null,
+      input.configTopic || null,
+      input.lastSample ?? null,
+      sensorId
+    )
 
     // Field mappings are replaced wholesale (pull_fields is shared by both
     // sources); readings are keyed by (sensor_id, metric) and are untouched.
@@ -523,6 +568,18 @@ export async function recordMqttReading(
   evaluateReadings(sensorId, metrics, now)
 
   return now
+}
+
+/**
+ * Record a device's availability. Unlike readings, this is driven by retained
+ * messages on purpose: the broker replays the last known state on subscribe,
+ * and the LWT publishes "offline" if the device drops, so the retained value
+ * is the truth rather than a stale reading.
+ */
+export async function recordMqttAvailability(sensorId: string, online: boolean): Promise<void> {
+  getDb()
+    .prepare('UPDATE sensors SET online = ?, online_at = ? WHERE id = ?')
+    .run(online ? 1 : 0, new Date().toISOString(), sensorId)
 }
 
 /** Record a soft failure (e.g. a message whose configured fields didn't resolve). */

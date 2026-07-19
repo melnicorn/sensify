@@ -75,6 +75,24 @@ Sensify runs an [Eclipse Mosquitto](https://mosquitto.org/) broker (the `mosquit
 
 `mqtt-ingest` picks up new and edited sensors within about 15 seconds and starts recording. Ingest can be paused/resumed from the sensor's detail page. Retained messages are dropped rather than recorded — they replay stale state on reconnect, which would otherwise fabricate a reading with a current timestamp.
 
+### Moving an existing device to MQTT
+
+Already have the device as a push or pull sensor? Open it and click **Switch to MQTT**. This edits the sensor in place — same readings, same alert rules — so its charts stay continuous instead of starting over under a new sensor. Field mappings whose paths still resolve in the MQTT payload are re-ticked automatically with their metric names intact, and anything left without a source is called out before you save.
+
+### Device availability
+
+If your device publishes an online/offline signal — the usual pattern is a retained `online` plus an MQTT *last will* of `offline`, so the broker announces it when the device drops — pick that topic as the sensor's **availability topic** when adding it. The sensor page then shows the device as Online/Offline, and offline devices are flagged on the dashboard. `online`/`offline`, `true`/`false` and `1`/`0` are all understood; anything else is ignored rather than guessed at.
+
+### Device config (optional)
+
+The push API hands a device its reporting interval in the POST response. MQTT has no request/response equivalent, so Sensify instead publishes config as a **retained** message on a per-device config topic — which is strictly better, since a device gets its config immediately on connect rather than on its next report. Set a **config topic** when adding the sensor, then use the reporting-interval field on its detail page. Sensify publishes:
+
+```json
+{ "interval": 120 }
+```
+
+Your device subscribes to that topic and applies it — a handful of lines of firmware. Leave the config topic blank if your device doesn't read config.
+
 ### Credentials
 
 The broker requires a username and password (anonymous access is off). Both default to `sensify` / `sensify`. Override them before pointing any device at the broker — set `MQTT_USERNAME` and `MQTT_PASSWORD` (for example in a `.env` file next to the compose file), then recreate the stack. The same values are what you enter into each device's MQTT settings.
