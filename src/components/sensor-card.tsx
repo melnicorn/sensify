@@ -1,12 +1,15 @@
 import Link from 'next/link'
-import { Thermometer, Droplets, Gauge, Clock, MapPin, Download, Upload, Radio, AlertTriangle, PauseCircle } from 'lucide-react'
+import { Thermometer, Droplets, Gauge, Clock, MapPin, Download, Upload, Radio, AlertTriangle, PauseCircle, Bell, BellOff, CheckCircle2 } from 'lucide-react'
 import type { SensorMeta, LatestMetric, AppConfig } from '@/lib/types'
+import type { SensorAlertSummary } from '@/lib/alerts/repo'
 import { formatTemperature, formatHumidity, formatMetricValue, metricLabel } from '@/lib/units'
 
 interface Props {
   meta: SensorMeta
   latest: LatestMetric[]
   config: AppConfig
+  /** Absent when the sensor has no alert rules — the card then shows nothing. */
+  alert?: SensorAlertSummary
 }
 
 function timeAgo(isoStr: string): string {
@@ -55,7 +58,64 @@ function MetricValue({ meta, m, config }: { meta: SensorMeta; m: LatestMetric; c
   )
 }
 
-export function SensorCard({ meta, latest, config }: Props) {
+/** Compact alert state. Renders nothing when the sensor has no rules. */
+function AlertLine({ alert }: { alert: SensorAlertSummary }) {
+  const extra = alert.ruleCount > 1 ? ` +${alert.ruleCount - 1}` : ''
+  const base = 'flex items-center gap-1 text-xs mb-2 truncate'
+
+  switch (alert.status) {
+    case 'active':
+      return (
+        <p className={`${base} text-primary`}>
+          <span className="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-current" />
+          <span className="truncate">
+            {alert.ruleName}
+            {alert.since && ` · ${timeAgo(alert.since).replace(' ago', '')}`}
+            {extra}
+          </span>
+        </p>
+      )
+    case 'error':
+      return (
+        <p className={`${base} text-amber-600 dark:text-amber-400`}>
+          <AlertTriangle size={12} className="shrink-0" />
+          <span className="truncate">
+            {alert.ruleName} — alert error{extra}
+          </span>
+        </p>
+      )
+    case 'completed':
+      return (
+        <p className={`${base} text-green-600 dark:text-green-400`}>
+          <CheckCircle2 size={12} className="shrink-0" />
+          <span className="truncate">
+            {alert.ruleName} finished {alert.since && timeAgo(alert.since)}
+            {extra}
+          </span>
+        </p>
+      )
+    case 'paused':
+      return (
+        <p className={`${base} text-muted-foreground`}>
+          <BellOff size={12} className="shrink-0" />
+          <span className="truncate">
+            {alert.ruleName} paused{extra}
+          </span>
+        </p>
+      )
+    default:
+      // Idle: deliberately the quietest state, so a dashboard of calm sensors
+      // stays calm — just a count, no rule name.
+      return (
+        <p className={`${base} text-muted-foreground/70`}>
+          <Bell size={12} className="shrink-0" />
+          {alert.ruleCount} alert{alert.ruleCount === 1 ? '' : 's'}
+        </p>
+      )
+  }
+}
+
+export function SensorCard({ meta, latest, config, alert }: Props) {
   const locationParts = [meta.location, meta.zone].filter(Boolean)
   const latestTs = latest.reduce<string | null>((max, m) => (max && max > m.ts ? max : m.ts), null)
   // pull and mqtt share the same enabled/error bookkeeping
@@ -98,6 +158,8 @@ export function SensorCard({ meta, latest, config }: Props) {
           )}
         </div>
       )}
+
+      {alert && <AlertLine alert={alert} />}
 
       {meta.mqtt?.online === false && (
         <p className="flex items-center gap-1 text-xs text-destructive mb-2">

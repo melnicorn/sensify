@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import Link from 'next/link'
 import { Button } from '@heroui/react'
-import { Radio, Play, Pause, AlertTriangle, CheckCircle2 } from 'lucide-react'
+import { Radio, Play, Pause, Pencil, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import { setMqttEnabledAction, setMqttConfigIntervalAction } from '@/app/actions'
 import type { SensorMeta } from '@/lib/types'
 
@@ -43,16 +44,25 @@ export function MqttStatusPanel({ meta }: { meta: SensorMeta }) {
           <Radio size={14} className="text-muted-foreground" />
           <h2 className="text-sm font-medium text-foreground">MQTT subscription</h2>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          isIconOnly
-          aria-label={m.enabled ? 'Pause ingest' : 'Resume ingest'}
-          isDisabled={pending}
-          onPress={toggle}
-        >
-          {m.enabled ? <Pause size={14} /> : <Play size={14} />}
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            isIconOnly
+            aria-label={m.enabled ? 'Pause ingest' : 'Resume ingest'}
+            isDisabled={pending}
+            onPress={toggle}
+          >
+            {m.enabled ? <Pause size={14} /> : <Play size={14} />}
+          </Button>
+          <Link
+            href={`/devices/${meta.id}/edit`}
+            aria-label="Edit sensor"
+            className="p-2 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Pencil size={14} />
+          </Link>
+        </div>
       </div>
 
       <dl className="space-y-2 text-sm">

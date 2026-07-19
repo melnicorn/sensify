@@ -1,12 +1,17 @@
 import Link from 'next/link'
 import { Plus } from 'lucide-react'
 import { listSensors, getLatestMetrics, getConfig } from '@/lib/storage'
+import { listSensorAlertSummaries } from '@/lib/alerts/repo'
 
 export const dynamic = 'force-dynamic'
 import { SensorCard } from '@/components/sensor-card'
 
 export default async function DashboardPage() {
-  const [sensors, config] = await Promise.all([listSensors(), getConfig()])
+  const [sensors, config, alertSummaries] = await Promise.all([
+    listSensors(),
+    getConfig(),
+    listSensorAlertSummaries(),
+  ])
   const withLatest = await Promise.all(
     sensors.map(async (meta) => ({ meta, latest: await getLatestMetrics(meta.id) }))
   )
@@ -41,7 +46,13 @@ export default async function DashboardPage() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {withLatest.map(({ meta, latest }) => (
-            <SensorCard key={meta.id} meta={meta} latest={latest} config={config} />
+            <SensorCard
+              key={meta.id}
+              meta={meta}
+              latest={latest}
+              config={config}
+              alert={alertSummaries.get(meta.id)}
+            />
           ))}
         </div>
       )}

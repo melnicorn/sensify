@@ -390,6 +390,109 @@ export async function listEventsForSensor(
   }))
 }
 
+// ---------- dashboard summary ----------
+
+/** How long a finished event still counts as "recently completed". */
+export const RECENTLY_COMPLETED_MS = 60 * 60 * 1000
+
+export type SensorAlertStatus = 'active' | 'error' | 'completed' | 'paused' | 'inactive'
+
+export interface SensorAlertSummary {
+  status: SensorAlertStatus
+  /** The rule that determined the status. */
+  ruleName: string
+  /** Total rules on the sensor, so the card can say "+2 more". */
+  ruleCount: number
+  /** Event start for 'active', event end for 'completed'. */
+  since?: string
+}
+
+const STATUS_RANK: Record<SensorAlertStatus, number> = {
+  active: 0,
+  error: 1,
+  completed: 2,
+  paused: 3,
+  inactive: 4,
+}
+
+/**
+ * One compact alert status per sensor for the dashboard, in three flat queries
+ * rather than per-sensor lookups (the dashboard renders every sensor).
+ *
+ * Status comes from events rather than the machine phase: `pending` and
+ * `clearing` are debounce internals, so a rule in `pending` hasn't fired and
+ * shouldn't light up the card. Sensors with no rules are absent from the map.
+ */
+export async function listSensorAlertSummaries(
+  nowMs = Date.now()
+): Promise<Map<string, SensorAlertSummary>> {
+  const db = getDb()
+
+  const rules = db
+    .prepare('SELECT id, sensor_id, name, enabled, last_error FROM alert_rules')
+    .all() as {
+    id: string
+    sensor_id: string
+    name: string
+    enabled: number
+    last_error: string | null
+  }[]
+  if (rules.length === 0) return new Map()
+
+  const openStartedAt = new Map(
+    (
+      db
+        .prepare('SELECT rule_id, MIN(started_at) AS started_at FROM alert_events WHERE ended_at IS NULL GROUP BY rule_id')
+        .all() as { rule_id: string; started_at: string }[]
+    ).map((r) => [r.rule_id, r.started_at])
+  )
+  const lastEndedAt = new Map(
+    (
+      db
+        .prepare('SELECT rule_id, MAX(ended_at) AS ended_at FROM alert_events WHERE ended_at IS NOT NULL GROUP BY rule_id')
+        .all() as { rule_id: string; ended_at: string }[]
+    ).map((r) => [r.rule_id, r.ended_at])
+  )
+
+  const summaries = new Map<string, SensorAlertSummary>()
+  for (const rule of rules) {
+    const openedAt = openStartedAt.get(rule.id)
+    const endedAt = lastEndedAt.get(rule.id)
+
+    let status: SensorAlertStatus
+    let since: string | undefined
+    if (openedAt) {
+      status = 'active'
+      since = openedAt
+    } else if (rule.last_error) {
+      // The engine records an unparseable definition here too, so this covers
+      // both delivery failures and broken rules.
+      status = 'error'
+    } else if (endedAt && nowMs - Date.parse(endedAt) < RECENTLY_COMPLETED_MS) {
+      status = 'completed'
+      since = endedAt
+    } else if (rule.enabled !== 1) {
+      status = 'paused'
+    } else {
+      status = 'inactive'
+    }
+
+    const current = summaries.get(rule.sensor_id)
+    if (!current) {
+      summaries.set(rule.sensor_id, { status, ruleName: rule.name, ruleCount: 1, since })
+    } else {
+      const wins = STATUS_RANK[status] < STATUS_RANK[current.status]
+      summaries.set(rule.sensor_id, {
+        status: wins ? status : current.status,
+        ruleName: wins ? rule.name : current.ruleName,
+        since: wins ? since : current.since,
+        ruleCount: current.ruleCount + 1,
+      })
+    }
+  }
+  return summaries
+}
+
 export async function listRecentEvents(limit = 100): Promise<AlertEvent[]> {
   const rows = getDb()
     .prepare('SELECT * FROM alert_events ORDER BY started_at DESC LIMIT ?')
