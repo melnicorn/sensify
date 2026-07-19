@@ -39,11 +39,29 @@ services:
   # (Shelly, ESP32 nodes) can reach it; do not forward it past the LAN.
   mosquitto:
     image: eclipse-mosquitto:2
-    command: >
-      sh -c "mosquitto_passwd -b -c /mosquitto/config/passwordfile \"$$MQTT_USERNAME\" \"$$MQTT_PASSWORD\" &&
-      chown mosquitto:mosquitto /mosquitto/config/passwordfile && chmod 0700 /mosquitto/config/passwordfile &&
-      printf 'listener 1883\nallow_anonymous false\npassword_file /mosquitto/config/passwordfile\npersistence true\npersistence_location /mosquitto/data/\n' > /mosquitto/config/mosquitto.conf &&
-      exec mosquitto -c /mosquitto/config/mosquitto.conf"
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        # -c refuses to overwrite an existing file, and `restart: unless-stopped`
+        # restarts *this* container (so /mosquitto/config survives). Without the
+        # rm, any single failed start wedges the container in an unrecoverable
+        # restart loop.
+        rm -f /mosquitto/config/passwordfile
+        mosquitto_passwd -b -c /mosquitto/config/passwordfile "$$MQTT_USERNAME" "$$MQTT_PASSWORD"
+        chown mosquitto:mosquitto /mosquitto/config/passwordfile 2>/dev/null || true
+        chmod 0700 /mosquitto/config/passwordfile 2>/dev/null || true
+        # One echo per directive: whether printf interprets \n escapes varies by
+        # shell, and getting it wrong silently produces a single-line config.
+        {
+          echo "listener 1883"
+          echo "allow_anonymous false"
+          echo "password_file /mosquitto/config/passwordfile"
+          echo "persistence true"
+          echo "persistence_location /mosquitto/data/"
+        } > /mosquitto/config/mosquitto.conf
+        exec mosquitto -c /mosquitto/config/mosquitto.conf
     ports:
       - "1883:1883"
     environment:
