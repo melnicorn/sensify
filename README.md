@@ -75,6 +75,14 @@ Sensify runs an [Eclipse Mosquitto](https://mosquitto.org/) broker (the `mosquit
 
 `mqtt-ingest` picks up new and edited sensors within about 15 seconds and starts recording. Ingest can be paused/resumed from the sensor's detail page. Retained messages are dropped rather than recorded — they replay stale state on reconnect, which would otherwise fabricate a reading with a current timestamp.
 
+### Pick a snapshot topic, not an event feed
+
+Devices often publish two kinds of topic: a **status/state** topic carrying the component's full current values on every message, and an **event** topic carrying only what just changed, usually wrapped in an envelope. Point Sensify at the snapshot topic.
+
+An event feed is the more tempting one — it updates constantly and the values are real — but its *shape* changes with whatever happened to change. Fields come and go between messages, rarely-changing values like energy totals show up only occasionally, and some never appear while you're looking. You end up unable to select the fields you want, or with metrics that record sporadically.
+
+The tell is an envelope: a payload with `method` / `params` wrappers, or one where the interesting values are nested under a key naming the event rather than sitting at the top level. On a Shelly, prefer `<prefix>/status/switch:0` over `<prefix>/events/rpc` — and note the snapshot topics only publish once **Generic status update over MQTT** is enabled in the device's settings, which is off by default.
+
 ### Moving an existing device to MQTT
 
 Already have the device as a push or pull sensor? Open it and click **Switch to MQTT**. This edits the sensor in place — same readings, same alert rules — so its charts stay continuous instead of starting over under a new sensor. Field mappings whose paths still resolve in the MQTT payload are re-ticked automatically with their metric names intact, and anything left without a source is called out before you save.

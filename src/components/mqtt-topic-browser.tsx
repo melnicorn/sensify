@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@heroui/react'
-import { Radio, Square, X, Trash2 } from 'lucide-react'
+import { Radio, Square, X, Trash2, Copy, Check } from 'lucide-react'
 import { JsonTree } from '@/components/json-tree'
 import {
   createMqttSensorAction,
@@ -85,6 +85,7 @@ export function MqttTopicBrowser({
   const [availabilityTopic, setAvailabilityTopic] = useState(initialAvailabilityTopic ?? '')
   const [configTopic, setConfigTopic] = useState(initialConfigTopic ?? '')
   const [deleteRemovedData, setDeleteRemovedData] = useState(false)
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [saving, startSave] = useTransition()
   const [saveError, setSaveError] = useState<string | null>(null)
 
@@ -168,6 +169,44 @@ export function MqttTopicBrowser({
 
   const topics = Object.values(messages).sort((a, b) => a.topic.localeCompare(b.topic))
   const selected = selectedTopic ? messages[selectedTopic] : undefined
+
+  /** Legacy copy path: works on plain http and when the document isn't focused. */
+  function legacyCopy(text: string): boolean {
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      const ok = document.execCommand('copy')
+      document.body.removeChild(ta)
+      return ok
+    } catch {
+      return false
+    }
+  }
+
+  async function copyRaw() {
+    if (!selected) return
+    const text = selected.raw
+    let ok = false
+    // Sensify is usually reached over plain http on a LAN address, which isn't
+    // a secure context, so the async clipboard API is often unavailable — and
+    // it can reject even where it exists. Fall back rather than fail silently.
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(text)
+        ok = true
+      } catch {
+        ok = legacyCopy(text)
+      }
+    } else {
+      ok = legacyCopy(text)
+    }
+    setCopyState(ok ? 'copied' : 'failed')
+    setTimeout(() => setCopyState('idle'), 2000)
+  }
 
   function toggleField(path: string) {
     setFields((prev) => {
@@ -295,7 +334,28 @@ export function MqttTopicBrowser({
       {(running || topics.length > 0) && (
         <section className="rounded-lg border border-border bg-card p-4 space-y-3">
           <div>
-            <h2 className="text-sm font-medium text-foreground">Payload &amp; fields</h2>
+            <div className="flex items-start justify-between gap-3">
+              <h2 className="text-sm font-medium text-foreground">Payload &amp; fields</h2>
+              {selected && (
+                <button
+                  type="button"
+                  onClick={copyRaw}
+                  className={`flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors ${
+                    copyState === 'failed'
+                      ? 'border-destructive/40 text-destructive'
+                      : 'border-border text-muted-foreground hover:text-foreground'
+                  }`}
+                  title={`Copy the raw payload of ${selected.topic}`}
+                >
+                  {copyState === 'copied' ? <Check size={12} /> : <Copy size={12} />}
+                  {copyState === 'copied'
+                    ? 'Copied'
+                    : copyState === 'failed'
+                      ? 'Copy blocked'
+                      : 'Copy raw JSON'}
+                </button>
+              )}
+            </div>
             <p className="text-xs text-muted-foreground mt-1">
               Pick a topic, then tick the numeric or boolean values to record. Booleans are stored
               as 0/1.
