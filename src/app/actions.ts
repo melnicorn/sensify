@@ -11,10 +11,15 @@ import {
   createPullSensor,
   updatePullSensor,
   setPullEnabled,
+  createMqttSensor,
+  convertSensorToMqtt,
+  setMqttEnabled,
+  getSensorMeta,
   getReadings,
   getLatestMetrics,
 } from '@/lib/storage'
-import { PullDeviceInputSchema } from '@/lib/schemas'
+import { PullDeviceInputSchema, MqttDeviceInputSchema } from '@/lib/schemas'
+import { publishRetained } from '@/lib/mqtt-publish'
 import { rangeHours } from '@/lib/chart-ranges'
 import type { MetricReading, LatestMetric } from '@/lib/types'
 
@@ -178,6 +183,87 @@ function extractSample(input: unknown): { lastSample: string | null } {
 
 export async function setPullEnabledAction(sensorId: string, enabled: boolean): Promise<void> {
   await setPullEnabled(sensorId, enabled)
+  revalidatePath(`/sensors/${sensorId}`)
+  revalidatePath('/')
+}
+
+// ---------- mqtt devices ----------
+
+export async function createMqttSensorAction(input: unknown): Promise<SavePullDeviceResult> {
+  const result = MqttDeviceInputSchema.safeParse(input)
+  if (!result.success) {
+    return { error: result.error.issues[0]?.message ?? 'Invalid MQTT sensor configuration' }
+  }
+  // The sample is the raw payload string (already JSON text), stored verbatim
+  // so the field mappings can be re-edited later — same role as pull's lastSample.
+  const rawSample =
+    input && typeof input === 'object' && 'sample' in input
+      ? (input as { sample: unknown }).sample
+      : null
+  const lastSample = typeof rawSample === 'string' ? rawSample.slice(0, 65536) : null
+  const id = await createMqttSensor({ ...result.data, lastSample })
+  revalidatePath('/')
+  return { id }
+}
+
+/** Move an existing pull/push sensor onto MQTT in place, keeping its history. */
+export async function convertSensorToMqttAction(
+  sensorId: string,
+  input: unknown
+): Promise<SavePullDeviceResult> {
+  const result = MqttDeviceInputSchema.safeParse(input)
+  if (!result.success) {
+    return { error: result.error.issues[0]?.message ?? 'Invalid MQTT sensor configuration' }
+  }
+  const rawSample =
+    input && typeof input === 'object' && 'sample' in input
+      ? (input as { sample: unknown }).sample
+      : null
+  const lastSample = typeof rawSample === 'string' ? rawSample.slice(0, 65536) : null
+  try {
+    await convertSensorToMqtt(sensorId, { ...result.data, lastSample })
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Conversion failed' }
+  }
+  revalidatePath('/')
+  revalidatePath(`/sensors/${sensorId}`)
+  return { id: sensorId }
+}
+
+/**
+ * Set an MQTT device's reporting interval and publish it retained to the
+ * sensor's config topic — the MQTT counterpart to the push API returning
+ * `{ config: { interval } }`. Clearing it removes the retained message.
+ */
+export async function setMqttConfigIntervalAction(
+  sensorId: string,
+  interval: number | null
+): Promise<{ error?: string; success?: boolean }> {
+  if (interval !== null && (!Number.isInteger(interval) || interval < 5 || interval > 86400)) {
+    return { error: 'Interval must be between 5 and 86400 seconds' }
+  }
+  await updateDesiredInterval(sensorId, interval)
+
+  const meta = await getSensorMeta(sensorId)
+  const topic = meta?.mqtt?.configTopic
+  if (topic) {
+    try {
+      // An empty payload clears the retained config.
+      await publishRetained(topic, interval === null ? '' : JSON.stringify({ interval }))
+    } catch (err) {
+      return {
+        error: `Saved, but publishing to ${topic} failed: ${
+          err instanceof Error ? err.message : 'unknown error'
+        }`,
+      }
+    }
+  }
+  revalidatePath(`/sensors/${sensorId}`)
+  return { success: true }
+}
+
+export async function setMqttEnabledAction(sensorId: string, enabled: boolean): Promise<void> {
+  await setMqttEnabled(sensorId, enabled)
   revalidatePath(`/sensors/${sensorId}`)
   revalidatePath('/')
 }

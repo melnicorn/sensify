@@ -91,7 +91,7 @@ export function metricDisplayInfo(
   config: AppConfig,
   metric: string
 ): { isTemp: boolean; unit: string } {
-  const field = meta.pull?.fields.find((f) => f.metric === metric)
+  const field = (meta.pull ?? meta.mqtt)?.fields.find((f) => f.metric === metric)
   const isTemp =
     (meta.type === 'push' && metric === 'temperature') || field?.unitKind === 'temperature'
   const unit = isTemp

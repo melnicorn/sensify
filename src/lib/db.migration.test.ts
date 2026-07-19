@@ -113,6 +113,23 @@ describe('migrating a legacy production database', () => {
     expect(power.value).toBe(42)
   })
 
+  it('widens the source discriminator to allow mqtt and adds topic/qos', () => {
+    // The legacy pull sensor + its fields survived the sensors table rebuild
+    expect(db.prepare('SELECT COUNT(*) c FROM pull_fields').get()).toEqual({ c: 2 })
+    // New columns exist and the mqtt type is now accepted
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO sensors (id, type, name, first_seen, last_seen, topic, qos)
+           VALUES ('m1', 'mqtt', 'M', '2026-07-01T00:00:00.000Z', '2026-07-01T00:00:00.000Z', 'home/m1', 1)`
+        )
+        .run()
+    ).not.toThrow()
+    const row = db.prepare("SELECT type, topic, qos FROM sensors WHERE id = 'm1'").get()
+    expect(row).toEqual({ type: 'mqtt', topic: 'home/m1', qos: 1 })
+    db.prepare("DELETE FROM sensors WHERE id = 'm1'").run()
+  })
+
   it('creates the alerting tables', () => {
     const tables = (
       db

@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Thermometer, Droplets, Gauge, Clock, MapPin, Download, Upload, AlertTriangle, PauseCircle } from 'lucide-react'
+import { Thermometer, Droplets, Gauge, Clock, MapPin, Download, Upload, Radio, AlertTriangle, PauseCircle } from 'lucide-react'
 import type { SensorMeta, LatestMetric, AppConfig } from '@/lib/types'
 import { formatTemperature, formatHumidity, formatMetricValue, metricLabel } from '@/lib/units'
 
@@ -20,7 +20,7 @@ function timeAgo(isoStr: string): string {
 }
 
 function MetricValue({ meta, m, config }: { meta: SensorMeta; m: LatestMetric; config: AppConfig }) {
-  const field = meta.pull?.fields.find((f) => f.metric === m.metric)
+  const field = (meta.pull ?? meta.mqtt)?.fields.find((f) => f.metric === m.metric)
   // Temperatures are stored canonically in °C — push sensors always, pull
   // fields when their unit label was recognized as a temperature
   const isTemp =
@@ -58,8 +58,10 @@ function MetricValue({ meta, m, config }: { meta: SensorMeta; m: LatestMetric; c
 export function SensorCard({ meta, latest, config }: Props) {
   const locationParts = [meta.location, meta.zone].filter(Boolean)
   const latestTs = latest.reduce<string | null>((max, m) => (max && max > m.ts ? max : m.ts), null)
-  const pullPaused = meta.pull ? !meta.pull.enabled : false
-  const pullError = meta.pull?.enabled && meta.pull.lastError ? meta.pull.lastError : null
+  // pull and mqtt share the same enabled/error bookkeeping
+  const src = meta.pull ?? meta.mqtt
+  const srcPaused = src ? !src.enabled : false
+  const srcError = src?.enabled && src.lastError ? src.lastError : null
 
   return (
     <Link
@@ -70,6 +72,8 @@ export function SensorCard({ meta, latest, config }: Props) {
         <h2 className="flex items-center gap-1.5 font-semibold text-foreground min-w-0">
           {meta.type === 'pull' ? (
             <Download size={13} className="text-muted-foreground shrink-0" aria-label="Pull device" />
+          ) : meta.type === 'mqtt' ? (
+            <Radio size={13} className="text-muted-foreground shrink-0" aria-label="MQTT device" />
           ) : (
             <Upload size={13} className="text-muted-foreground shrink-0" aria-label="Push device" />
           )}
@@ -95,16 +99,22 @@ export function SensorCard({ meta, latest, config }: Props) {
         </div>
       )}
 
-      {pullPaused && (
-        <p className="flex items-center gap-1 text-xs text-muted-foreground mb-2">
-          <PauseCircle size={12} />
-          Polling paused
+      {meta.mqtt?.online === false && (
+        <p className="flex items-center gap-1 text-xs text-destructive mb-2">
+          <AlertTriangle size={12} className="shrink-0" />
+          Device offline
         </p>
       )}
-      {pullError && (
+      {srcPaused && (
+        <p className="flex items-center gap-1 text-xs text-muted-foreground mb-2">
+          <PauseCircle size={12} />
+          {meta.type === 'mqtt' ? 'Ingest paused' : 'Polling paused'}
+        </p>
+      )}
+      {srcError && (
         <p className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 mb-2 truncate">
           <AlertTriangle size={12} className="shrink-0" />
-          <span className="truncate">{pullError}</span>
+          <span className="truncate">{srcError}</span>
         </p>
       )}
 

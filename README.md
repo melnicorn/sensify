@@ -9,16 +9,18 @@ Data is stored in SQLite on a single volume, charted live in the web UI, and kep
 
 ## Features
 
-- Live-updating charts per sensor with 1h / 24h / 7d / 30d ranges
-- Generic pull devices: point at a JSON URL, test the connection, tick the fields to record, set a poll interval — done
-- Any numeric or boolean JSON field can become a metric, with optional display units
-- Push API with OpenAPI docs (Swagger UI built in at `/docs`)
-- Per-sensor metadata (location, zone, floor, hardware, tags)
-- Remote config for push devices: set a reporting interval in the UI and it's delivered on the device's next POST
-- Polling status, error reporting, and automatic backoff for unreachable devices
-- Alerts: drag across a chart to select an example event, and Sensify fits a trigger for it — reviewed as an editable sentence, previewed with a 7-day backtest, delivered via Telegram
-- Export chart data as JSON (current view, a drag-selected time frame, or everything), for viewing or download
-- Light/dark theme, temperature unit conversion (°C / °F / K) — pull fields with a recognized temperature unit label (`degC`, `°F`, `kelvin`, …) are normalized and follow the display preference too
+- **Interactive, Live-Updating Charts**: Live-updating charts with reload-free time range switching (1h / 24h / 7d / 30d), per-chart logarithmic/linear scale toggles, and click-and-drag chart zooming.
+- **Smart Alert Builder**: Drag across a chart to select an example event, or choose a preset pattern (cycle, spike, dip, level shift) derived automatically from the sensor's own history. Review fitted parameters as an editable sentence, preview with a 7-day backtest, and receive notifications via Telegram.
+- **Flexible Notification Control**: Toggle alerts on/off per event transition, and define delivery windows (allow/block mode hours in local time) to suppress notifications during quiet hours while still logging events.
+- **Alert Management & Editing**: Create, pause/resume, edit, or delete existing rules from the UI. Saving updates the rule cleanly and resets its tracking state.
+- **Per-Sensor Detail Pages**: View metadata (location, zone, floor, hardware, tags), active alert rules, recent alert event history, and a "Latest Readings" card that auto-refreshes matching the device's update cadence.
+- **Generic Pull Devices**: Point at any local network JSON URL, test the connection visually with a JSON tree browser, tick the fields to record, set a poll interval — done.
+- **Flexible Metrics**: Any numeric or boolean JSON field can become a metric, with optional display units and aliases.
+- **Push API**: Push readings via token-authenticated POST requests with built-in interactive OpenAPI/Swagger docs at `/docs`.
+- **Remote Config for Push**: Set desired reporting intervals in the UI, delivered to push devices in the response on their next POST.
+- **Robust Polling**: Polling status, detailed error reporting, and automatic backoff for unreachable pull devices.
+- **Export Data**: Export chart data as JSON (current view, a drag-selected time frame, or everything) for viewing or downloading.
+- **Display Customization**: Light/dark theme and temperature unit conversion (°C / °F / K) with automatic normalization for recognized temperature unit labels (`degC`, `°F`, `kelvin`, etc.).
 
 ## Getting started (Docker)
 
@@ -29,12 +31,14 @@ curl -LO https://github.com/melnicorn/sensify/releases/latest/download/docker-co
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-This starts two containers from the same image (published to GHCR for amd64 and arm64):
+This starts three containers from the same Sensify image (published to GHCR for amd64 and arm64), plus a Mosquitto broker:
 
 - **web** — the dashboard, on port `3010` by default (edit the compose file to change)
 - **poller** — a background process that polls your pull devices
+- **mqtt-ingest** — a background process that subscribes to the MQTT broker (see [MQTT](#mqtt))
+- **mosquitto** — an [Eclipse Mosquitto](https://mosquitto.org/) MQTT broker on port `1883`
 
-Both share a `sensor-data` volume holding the SQLite database, which is created automatically on first boot.
+The three Sensify containers share a `sensor-data` volume holding the SQLite database, which is created automatically on first boot.
 
 Open `http://<host>:3010`, then visit **Settings** to find your API token (auto-generated on first boot). Devices use this token to push readings.
 
@@ -57,6 +61,47 @@ Only containers whose image actually changed are recreated; your data volume is 
 5. Set a poll interval and save
 
 The poller picks up new and edited devices within about 15 seconds. Polling can be paused/resumed from the sensor's detail page, which also shows the last successful poll and any errors.
+
+## MQTT
+
+Sensify runs an [Eclipse Mosquitto](https://mosquitto.org/) broker (the `mosquitto` service) so devices can publish telemetry over MQTT — the protocol Tasmota, ESPHome, Shelly, Zigbee2MQTT and friends already speak — without any device-specific integration code. The `mqtt-ingest` service subscribes to the broker and records readings, exactly like the poller does for pull devices.
+
+### Adding an MQTT sensor
+
+1. Point your device at the broker (address `1883`, the credentials below).
+2. On the dashboard, **Add device → Browse MQTT topics**.
+3. Click **Listen** and pick your device's topic from the list as messages arrive (retained values appear immediately; live ones as the device publishes).
+4. Tick the numeric/boolean fields to record, name each metric (add a unit like `C` to get temperature normalization), name the sensor, and **Create sensor**.
+
+`mqtt-ingest` picks up new and edited sensors within about 15 seconds and starts recording. Ingest can be paused/resumed from the sensor's detail page. Retained messages are dropped rather than recorded — they replay stale state on reconnect, which would otherwise fabricate a reading with a current timestamp.
+
+### Moving an existing device to MQTT
+
+Already have the device as a push or pull sensor? Open it and click **Switch to MQTT**. This edits the sensor in place — same readings, same alert rules — so its charts stay continuous instead of starting over under a new sensor. Field mappings whose paths still resolve in the MQTT payload are re-ticked automatically with their metric names intact, and anything left without a source is called out before you save.
+
+### Device availability
+
+If your device publishes an online/offline signal — the usual pattern is a retained `online` plus an MQTT *last will* of `offline`, so the broker announces it when the device drops — pick that topic as the sensor's **availability topic** when adding it. The sensor page then shows the device as Online/Offline, and offline devices are flagged on the dashboard. `online`/`offline`, `true`/`false` and `1`/`0` are all understood; anything else is ignored rather than guessed at.
+
+### Device config (optional)
+
+The push API hands a device its reporting interval in the POST response. MQTT has no request/response equivalent, so Sensify instead publishes config as a **retained** message on a per-device config topic — which is strictly better, since a device gets its config immediately on connect rather than on its next report. Set a **config topic** when adding the sensor, then use the reporting-interval field on its detail page. Sensify publishes:
+
+```json
+{ "interval": 120 }
+```
+
+Your device subscribes to that topic and applies it — a handful of lines of firmware. Leave the config topic blank if your device doesn't read config.
+
+### Credentials
+
+The broker requires a username and password (anonymous access is off). Both default to `sensify` / `sensify`. Override them before pointing any device at the broker — set `MQTT_USERNAME` and `MQTT_PASSWORD` (for example in a `.env` file next to the compose file), then recreate the stack. The same values are what you enter into each device's MQTT settings.
+
+### Security model
+
+The broker listens on port `1883` in **plaintext — no TLS**. This is a deliberate, accepted trade-off for Sensify's deployment model: everything runs on your LAN, and remote access is expected to be via VPN (which makes you LAN-local), so nothing is exposed to the internet. **Do not forward port `1883` past your LAN.** TLS, WAN ingress, and remote auth are explicitly out of scope — if you need them, terminate them at a reverse proxy or VPN, not in Sensify.
+
+The Mosquitto config and password file are generated inside the container from the environment variables above, so the compose file stays self-contained (nothing extra to download). The trade-off: there is no hand-editable `mosquitto.conf` on disk. If you need to customise the broker (extra listeners, ACLs, bridges), mount your own config over `/mosquitto/config/mosquitto.conf` instead.
 
 ## Pushing readings
 
@@ -89,13 +134,28 @@ If the UI has set a desired reporting interval for the device, the response incl
 Sensify can watch any metric and message you when something starts and when it finishes — a washing machine cycle, a humidity threshold, a freezer warming up.
 
 1. In **Settings → Notification channels**, add a Telegram bot (token from [@BotFather](https://t.me/BotFather)) and the chat ID it should message, then hit **Test**.
-2. Open a sensor, drag across the chart to select one example of the event (include some quiet time around it), and click **Create alert**. No example yet? Hit **New alert** and pick a pattern (cycle, spike, dip, level shift) — thresholds are derived from the sensor's own history using robust statistics, with a sensitivity slider.
+2. Open a sensor, drag across the chart to select one example of the event (include some quiet time around it), and click **Create alert**. No example yet? Hit **New alert** and pick a pattern (cycle, spike, dip, level shift) — thresholds are derived from the sensor's own history using robust statistics, with a sensitivity slider. You can also write simple thresholds from scratch.
 3. Sensify fits a trigger from the selection — threshold, smoothing, and debounce — and shows it as an editable sentence like *"Start when average over 2 min is > 8 W holding for 60 s; end when it stays ≤ 8 W for 3 min."*
 4. The backtest strip replays the rule over the last 7 days so you can see exactly which events it would have caught before saving.
 
-Alerts are edge-triggered state machines: one message when the event starts, one when it ends (with duration and peak), no repeats while values hover around the threshold. Dwell times debounce noisy signals, and a re-arm delay prevents back-to-back firing. Rules can also be written from scratch for simple thresholds — pick the metric, comparison, and hold time in the same form.
+Alerts are edge-triggered state machines: one message when the event starts, one when it ends (with duration and peak), no repeats while values hover around the threshold. Dwell times debounce noisy signals, and a re-arm delay prevents back-to-back firing.
 
-Message templates support `{sensor}`, `{metric}`, `{value}`, `{min}`, `{max}`, `{avg}`, `{duration}`, and `{started_at}`. Rules, state, and event history live on the **Alerts** page; each sensor's rules also appear on its detail page.
+### Custom Delivery Windows (Quiet Hours)
+
+You can specify a notification delivery window for each alert rule. Choose between:
+- **Always** notify immediately on transition.
+- **Allow** delivery only during a specific hour span (e.g., `08:00` to `22:00`).
+- **Block** delivery during a specific hour span (e.g., mute nighttime alerts from `22:00` to `07:00`).
+
+Even when notifications are blocked or muted, the alert engine continues to run, evaluate readings, and log events in the history database.
+
+### Alert Management
+
+- **Editing**: Click **Edit** on any rule to open the alert wizard with its current parameters. Saving an edited rule restarts its tracking state machine cleanly (closing any in-progress events quietly).
+- **Monitoring**: Toggle individual notifications on/off per transition (e.g. only notify on start), or pause/resume the rule entirely.
+- **Logs**: View a history of recent events across all sensors on the global **Alerts** page, or filter to a single sensor's history directly on its detail page.
+
+Message templates support `{sensor}`, `{metric}`, `{value}`, `{min}`, `{max}`, `{avg}`, `{duration}`, and `{started_at}`.
 
 ## Running from source
 
@@ -104,10 +164,17 @@ Requires Node 22+ and pnpm.
 ```sh
 pnpm install
 pnpm dev         # web UI on http://localhost:3000
-pnpm poller:dev  # poller, in a second terminal
+pnpm poller:dev  # poller, in a second terminal (only needed for pull devices)
+pnpm ingest:dev  # mqtt-ingest, in a third terminal (only needed for MQTT sensors)
 ```
 
-Both processes share a SQLite database at `./data/sensify.db` (override the location with the `DATA_DIR` environment variable).
+These are three separate processes, like the three Docker containers. `pnpm dev`
+alone runs the dashboard but records nothing from pull or MQTT devices — the
+`poller` and `mqtt-ingest` processes are what write those readings. Run exactly
+one `mqtt-ingest` (a second instance double-records every message). It connects
+to `MQTT_URL` (default `mqtt://localhost:1883`); see [MQTT](#mqtt).
+
+All processes share a SQLite database at `./data/sensify.db` (override the location with the `DATA_DIR` environment variable).
 
 To build images locally instead of pulling from GHCR:
 

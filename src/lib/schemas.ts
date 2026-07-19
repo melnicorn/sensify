@@ -74,3 +74,33 @@ export const PullDeviceInputSchema = z.object({
 })
 
 export type PullDeviceInput = z.infer<typeof PullDeviceInputSchema>
+
+// ---------- mqtt devices ----------
+
+// A sensor's topics are concrete — wildcards are for browsing only.
+const ConcreteTopicSchema = z
+  .string()
+  .min(1)
+  .max(512)
+  .refine((t) => !t.includes('+') && !t.includes('#'), {
+    message: 'Must be a concrete topic (no + or # wildcards)',
+  })
+
+export const MqttDeviceInputSchema = z.object({
+  name: z.string().min(1).max(128),
+  topic: ConcreteTopicSchema,
+  qos: z.number().int().min(0).max(2).optional(),
+  // Optional: the topic carrying the device's online/offline signal, and the
+  // topic Sensify publishes retained config to. Both must be concrete.
+  availabilityTopic: ConcreteTopicSchema.optional(),
+  configTopic: ConcreteTopicSchema.optional(),
+  fields: z
+    .array(PullFieldSchema)
+    .min(1, 'Select at least one field to record')
+    .max(50)
+    .refine((fields) => new Set(fields.map((f) => f.metric)).size === fields.length, {
+      message: 'Metric names must be unique',
+    }),
+})
+
+export type MqttDeviceInput = z.infer<typeof MqttDeviceInputSchema>

@@ -1,4 +1,4 @@
-export type SensorType = 'push' | 'pull'
+export type SensorType = 'push' | 'pull' | 'mqtt'
 export type TemperatureUnit = 'C' | 'F' | 'K'
 
 // A single JSON field captured from a pull device, mapped to a named metric
@@ -22,6 +22,29 @@ export interface PullConfig {
   lastSample?: string | null // raw JSON body of the last successful pull (for re-editing field mappings)
 }
 
+// MQTT ingest config; present when type === 'mqtt'. Field mappings reuse
+// PullField (paths are payload-relative, transport-agnostic); availability
+// reuses the same last_success/last_error/consecutive_failures columns as pull.
+export interface MqttConfig {
+  topic: string // the topic this sensor's readings are published to
+  qos: number // subscription QoS (1 for readings)
+  enabled: boolean
+  fields: PullField[]
+  lastSuccess?: string | null
+  lastError?: string | null
+  consecutiveFailures: number
+  lastSample?: string | null // raw payload of the last message (for re-editing field mappings)
+  // Device availability (the LWT convention: retained "online", with "offline"
+  // published by the broker if the device drops). Feeds the same health UI as
+  // pull polling status. online is null until an availability message arrives.
+  availabilityTopic?: string | null
+  online?: boolean | null
+  onlineAt?: string | null
+  // Where Sensify publishes retained device config (the MQTT replacement for
+  // the push API returning config in its response).
+  configTopic?: string | null
+}
+
 export interface SensorMeta {
   id: string
   type: SensorType
@@ -40,6 +63,8 @@ export interface SensorMeta {
   desiredInterval?: number | null
   // pull polling config; present when type === 'pull'
   pull?: PullConfig
+  // mqtt subscription config; present when type === 'mqtt'
+  mqtt?: MqttConfig
 }
 
 // One time-series data point. Push sensors write metrics "temperature" (°C)

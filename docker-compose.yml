@@ -5,12 +5,18 @@ services:
       dockerfile: Dockerfile
     ports:
       - "3000:3000"
+    depends_on:
+      - mosquitto
     volumes:
       - sensor-data:/data
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
     environment:
       - DATA_DIR=/data
+      # The MQTT topic browser (a server action) connects to the broker on demand.
+      - MQTT_URL=mqtt://mosquitto:1883
+      - MQTT_USERNAME=${MQTT_USERNAME:-sensify}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-sensify}
     restart: unless-stopped
 
   poller:
@@ -26,5 +32,47 @@ services:
       - DATA_DIR=/data
     restart: unless-stopped
 
+  # MQTT broker. Config + password file are generated inline from the env vars
+  # below so this stays self-contained (no extra files to ship). allow_anonymous
+  # is off; plaintext (no TLS) is a deliberate accepted risk on a LAN-only,
+  # VPN-gated network — see the README. Port 1883 is published so LAN devices
+  # (Shelly, ESP32 nodes) can reach it; do not forward it past the LAN.
+  mosquitto:
+    image: eclipse-mosquitto:2
+    command: >
+      sh -c "mosquitto_passwd -b -c /mosquitto/config/passwordfile \"$$MQTT_USERNAME\" \"$$MQTT_PASSWORD\" &&
+      chown mosquitto:mosquitto /mosquitto/config/passwordfile && chmod 0700 /mosquitto/config/passwordfile &&
+      printf 'listener 1883\nallow_anonymous false\npassword_file /mosquitto/config/passwordfile\npersistence true\npersistence_location /mosquitto/data/\n' > /mosquitto/config/mosquitto.conf &&
+      exec mosquitto -c /mosquitto/config/mosquitto.conf"
+    ports:
+      - "1883:1883"
+    environment:
+      - MQTT_USERNAME=${MQTT_USERNAME:-sensify}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-sensify}
+    volumes:
+      - mosquitto-data:/mosquitto/data
+    restart: unless-stopped
+
+  # Third ingest transport, peer to web (push) and poller (pull). Same image,
+  # different command — mirrors the poller. Phase 1 only connects and logs.
+  mqtt-ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["pnpm", "ingest"]
+    depends_on:
+      - mosquitto
+    volumes:
+      - sensor-data:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - DATA_DIR=/data
+      - MQTT_URL=mqtt://mosquitto:1883
+      - MQTT_USERNAME=${MQTT_USERNAME:-sensify}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-sensify}
+    restart: unless-stopped
+
 volumes:
   sensor-data:
+  mosquitto-data:
