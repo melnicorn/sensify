@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Wifi, Download, Upload, Radio } from 'lucide-react'
+import { ArrowLeft, Wifi, Download, Upload, Radio, ChevronRight } from 'lucide-react'
 import { getSensorMeta, getReadings, getLatestMetrics, getConfig } from '@/lib/storage'
 import { listChannels, listRulesForSensor, listEventsForSensor } from '@/lib/alerts/repo'
 import { buildRuleViews } from '@/lib/alerts/views'
@@ -152,10 +152,30 @@ export default async function SensorDetailPage({
           }))}
       />
 
-      {/* Alert event history for this sensor */}
+      <SensorChartLive
+        meta={meta}
+        initialRange={range}
+        initialReadings={readings}
+        config={config}
+        channels={channels}
+      />
+
+      {/* Alert event history — below the chart and collapsed by default, since
+          the chart is what the page is for and this table can get long. Native
+          <details> keeps this a server component. */}
       {(ruleViews.length > 0 || events.length > 0) && (
-        <div className="rounded-lg border border-border bg-card p-4">
-          <h2 className="text-sm font-semibold text-foreground mb-2">Alert history</h2>
+        <details className="rounded-lg border border-border bg-card p-4 group">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-sm font-semibold text-foreground marker:hidden">
+            <ChevronRight
+              size={14}
+              className="text-muted-foreground transition-transform group-open:rotate-90"
+            />
+            Alert history
+            {events.length > 0 && (
+              <span className="font-normal text-muted-foreground">({events.length})</span>
+            )}
+          </summary>
+          <div className="mt-3">
           {events.length === 0 ? (
             <p className="text-sm text-muted-foreground">No alert events recorded yet.</p>
           ) : (
@@ -192,16 +212,9 @@ export default async function SensorDetailPage({
               </table>
             </div>
           )}
-        </div>
+          </div>
+        </details>
       )}
-
-      <SensorChartLive
-        meta={meta}
-        initialRange={range}
-        initialReadings={readings}
-        config={config}
-        channels={channels}
-      />
     </div>
   )
 }
