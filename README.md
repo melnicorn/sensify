@@ -52,6 +52,21 @@ docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compo
 
 Only containers whose image actually changed are recreated; your data volume is untouched.
 
+Releases sometimes change the compose file too — new services, new environment
+variables — so it's worth re-downloading it alongside the images.
+[`scripts/update-sensify.sh`](scripts/update-sensify.sh) does the whole update in
+one step: snapshot the database (booting applies any new schema migrations),
+fetch the current compose file, validate it before putting it in place, pull,
+recreate, and prune the superseded image layers. Copy it next to your compose
+file and run it:
+
+```sh
+./update-sensify.sh              # normal update
+BACKUP=0 ./update-sensify.sh     # skip the database snapshot
+```
+
+Your `.env` is never touched.
+
 ## Adding a pull device
 
 1. Click **Add device** on the dashboard
