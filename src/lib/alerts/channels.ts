@@ -36,7 +36,22 @@ const telegram: ChannelDriver = {
   },
 }
 
-const DRIVERS: Record<ChannelType, ChannelDriver> = { telegram }
+const peskybird: ChannelDriver = {
+  async send(config, message) {
+    const res = await fetch('https://peskybird.app/api/push/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${config.appToken}` },
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+      body: JSON.stringify({ topic: config.topic, title: message.title, body: message.text }),
+    })
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      throw new Error(`PeskyBird HTTP ${res.status}: ${body.slice(0, 200)}`)
+    }
+  },
+}
+
+const DRIVERS: Record<ChannelType, ChannelDriver> = { telegram, peskybird }
 
 /** Deliver to one channel, recording the outcome for the admin UI. Throws on
  *  failure so callers can aggregate. */
