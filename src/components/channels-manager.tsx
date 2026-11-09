@@ -12,6 +12,7 @@ import {
   type ChannelFormResult,
 } from '@/app/alerts-actions'
 import type { Channel } from '@/lib/alerts/repo'
+import type { ChannelType } from '@/lib/alerts/schemas'
 
 const inputClass =
   'w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary'
@@ -42,9 +43,26 @@ function ChannelForm({
     },
     null
   )
+  const [type, setType] = useState<ChannelType>(channel?.type ?? 'peskybird')
 
   return (
     <form action={formAction} className="space-y-3">
+      {channel ? (
+        <input type="hidden" name="type" value={type} />
+      ) : (
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-foreground">Type</label>
+          <select
+            name="type"
+            value={type}
+            onChange={(e) => setType(e.target.value as ChannelType)}
+            className={inputClass}
+          >
+            <option value="peskybird">PeskyBird</option>
+            <option value="telegram">Telegram</option>
+          </select>
+        </div>
+      )}
       <div className="space-y-1">
         <label className="text-xs font-medium text-foreground">Name</label>
         <input
@@ -52,40 +70,76 @@ function ChannelForm({
           required
           maxLength={64}
           defaultValue={channel?.name}
-          placeholder="Family Telegram"
+          placeholder={type === 'peskybird' ? 'Home automation' : 'Family Telegram'}
           className={inputClass}
         />
       </div>
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-foreground">Bot token</label>
-        <input
-          name="botToken"
-          required
-          type="password"
-          autoComplete="off"
-          maxLength={200}
-          defaultValue={channel?.config.botToken}
-          placeholder="123456789:AA…"
-          className={`${inputClass} font-mono`}
-        />
-        <p className="text-xs text-muted-foreground">
-          From <span className="font-mono">@BotFather</span> on Telegram.
-        </p>
-      </div>
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-foreground">Chat ID</label>
-        <input
-          name="chatId"
-          required
-          maxLength={64}
-          defaultValue={channel?.config.chatId}
-          placeholder="-1001234567890"
-          className={`${inputClass} font-mono`}
-        />
-        <p className="text-xs text-muted-foreground">
-          The user, group, or channel the bot should message.
-        </p>
-      </div>
+      {type === 'peskybird' ? (
+        <>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-foreground">App token</label>
+            <input
+              name="appToken"
+              required
+              type="password"
+              autoComplete="off"
+              maxLength={200}
+              defaultValue={channel?.config.appToken}
+              placeholder="pba_…"
+              className={`${inputClass} font-mono`}
+            />
+            <p className="text-xs text-muted-foreground">
+              From the App tokens page of the PeskyBird dashboard.
+            </p>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-foreground">Topic</label>
+            <input
+              name="topic"
+              required
+              maxLength={33}
+              defaultValue={channel?.config.topic ?? 'home-automation'}
+              className={`${inputClass} font-mono`}
+            />
+            <p className="text-xs text-muted-foreground">
+              Devices subscribed to this topic receive the alerts.
+            </p>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-foreground">Bot token</label>
+            <input
+              name="botToken"
+              required
+              type="password"
+              autoComplete="off"
+              maxLength={200}
+              defaultValue={channel?.config.botToken}
+              placeholder="123456789:AA…"
+              className={`${inputClass} font-mono`}
+            />
+            <p className="text-xs text-muted-foreground">
+              From <span className="font-mono">@BotFather</span> on Telegram.
+            </p>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-foreground">Chat ID</label>
+            <input
+              name="chatId"
+              required
+              maxLength={64}
+              defaultValue={channel?.config.chatId}
+              placeholder="-1001234567890"
+              className={`${inputClass} font-mono`}
+            />
+            <p className="text-xs text-muted-foreground">
+              The user, group, or channel the bot should message.
+            </p>
+          </div>
+        </>
+      )}
       <div className="flex items-center gap-2">
         <SubmitButton label={channel ? 'Save channel' : 'Add channel'} />
         <Button variant="ghost" size="sm" onPress={onDone}>
@@ -125,7 +179,9 @@ function ChannelRow({ channel }: { channel: Channel }) {
             {channel.type}
           </span>
         </p>
-        <p className="text-xs text-muted-foreground font-mono">chat {channel.config.chatId}</p>
+        <p className="text-xs text-muted-foreground font-mono">
+          {channel.type === 'peskybird' ? `#${channel.config.topic}` : `chat ${channel.config.chatId}`}
+        </p>
         {status &&
           (status.ok ? (
             <p className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
@@ -200,7 +256,7 @@ export function ChannelsManager({ channels }: { channels: Channel[] }) {
 
       {channels.length === 0 && !adding ? (
         <p className="text-sm text-muted-foreground pt-3">
-          No channels yet. Add a Telegram bot to receive alerts.
+          No channels yet. Add a PeskyBird topic or a Telegram bot to receive alerts.
         </p>
       ) : (
         <div className="divide-y divide-border">

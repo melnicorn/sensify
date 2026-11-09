@@ -21,28 +21,53 @@ export interface ChannelFormResult {
   success?: boolean
 }
 
-const TelegramFormSchema = z.object({
-  name: z.string().trim().min(1, 'Name is required').max(64),
-  botToken: z.string().trim().min(10, 'Bot token looks too short').max(200),
-  chatId: z.string().trim().min(1, 'Chat ID is required').max(64),
-})
+const nameField = z.string().trim().min(1, 'Name is required').max(64)
 
-function parseTelegramForm(formData: FormData) {
-  return TelegramFormSchema.safeParse({
-    name: formData.get('name'),
-    botToken: formData.get('botToken'),
-    chatId: formData.get('chatId'),
-  })
+const ChannelFormSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('telegram'),
+    name: nameField,
+    config: z.object({
+      botToken: z.string().trim().min(10, 'Bot token looks too short').max(200),
+      chatId: z.string().trim().min(1, 'Chat ID is required').max(64),
+    }),
+  }),
+  z.object({
+    type: z.literal('peskybird'),
+    name: nameField,
+    config: z.object({
+      appToken: z.string().trim().min(10, 'App token looks too short').max(200),
+      topic: z
+        .string()
+        .trim()
+        .transform((t) => t.replace(/^#/, ''))
+        .pipe(
+          z
+            .string()
+            .max(32, 'Topic is at most 32 characters')
+            .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, 'Topic is lowercase letters and digits joined by hyphens')
+        ),
+    }),
+  }),
+])
+
+function parseChannelForm(formData: FormData) {
+  const type = formData.get('type')
+  const config =
+    type === 'peskybird'
+      ? { appToken: formData.get('appToken'), topic: formData.get('topic') }
+      : { botToken: formData.get('botToken'), chatId: formData.get('chatId') }
+  return ChannelFormSchema.safeParse({ type, name: formData.get('name'), config })
 }
 
 export async function createChannelAction(
   _prev: ChannelFormResult | null,
   formData: FormData
 ): Promise<ChannelFormResult> {
-  const result = parseTelegramForm(formData)
+  const result = parseChannelForm(formData)
   if (!result.success) return { error: result.error.issues[0]?.message ?? 'Invalid values' }
-  const { name, botToken, chatId } = result.data
-  await createChannel({ name, type: 'telegram', config: { botToken, chatId } })
+  const { name, type, config } = result.data
+  await createChannel({ name, type, config })
   revalidatePath('/settings')
   return { success: true }
 }
@@ -52,11 +77,11 @@ export async function updateChannelAction(
   _prev: ChannelFormResult | null,
   formData: FormData
 ): Promise<ChannelFormResult> {
-  const result = parseTelegramForm(formData)
+  const result = parseChannelForm(formData)
   if (!result.success) return { error: result.error.issues[0]?.message ?? 'Invalid values' }
-  const { name, botToken, chatId } = result.data
+  const { name, config } = result.data
   try {
-    await updateChannel(channelId, { name, config: { botToken, chatId } })
+    await updateChannel(channelId, { name, config })
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Update failed' }
   }

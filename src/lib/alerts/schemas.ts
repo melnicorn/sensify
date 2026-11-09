@@ -100,7 +100,7 @@ export interface EventStats {
 
 // ---------- notification channels ----------
 
-export const ChannelTypeSchema = z.enum(['telegram'])
+export const ChannelTypeSchema = z.enum(['telegram', 'peskybird'])
 export type ChannelType = z.infer<typeof ChannelTypeSchema>
 
 export const TelegramConfigSchema = z.object({
@@ -108,6 +108,12 @@ export const TelegramConfigSchema = z.object({
   chatId: z.string().trim().min(1).max(64),
 })
 
+export const PeskyBirdConfigSchema = z.object({
+  appToken: z.string().trim().min(10).max(200),
+  topic: z.string().trim().max(32).regex(/^[a-z0-9]+(-[a-z0-9]+)*$/),
+})
+
 export const CHANNEL_CONFIG_SCHEMAS: Record<ChannelType, z.ZodType<Record<string, string>>> = {
   telegram: TelegramConfigSchema,
+  peskybird: PeskyBirdConfigSchema,
 }
